@@ -41,3 +41,14 @@ example
 # generated native folders
 /ios
 /android
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Unused local data
+trips-full.txt
+
+# Local development backups
+*.backup-*

@@ -1,98 +1,658 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React from 'react';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  SafeAreaView,
+  StatusBar,
+} from 'react-native';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
+import { router } from 'expo-router';
+
+import {
+  BrandColors,
+} from '../constants/theme';
+
+
+/*
+=========================================================
+KADUNA ONLY SPLASH SCREEN
+=========================================================
+*/
+
+export default function WelcomeScreen() {
+
+  function continueAsRider() {
+
+    router.push('/login');
+
   }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
+
+
+  function continueAsDriver() {
+
+    router.push('/login');
+
   }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+
+
+  function createAccount() {
+
+    router.push('/register');
+
+  }
+
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
 
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <View style={styles.screen}>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor={
+          BrandColors.primary
+        }
+      />
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+
+      <SafeAreaView
+        style={styles.safeArea}
+      >
+
+        <View
+          style={styles.container}
+        >
+
+          {/* =================================================
+              BRAND LOGO
+          ================================================= */}
+
+          <View
+            style={styles.brandArea}
+          >
+
+            <View
+              style={styles.logoMark}
+            >
+
+              <View
+                style={styles.logoTowerLeft}
+              />
+
+              <View
+                style={styles.logoTowerCenter}
+              />
+
+              <View
+                style={styles.logoTowerRight}
+              />
+
+            </View>
+
+
+            <Text
+              style={styles.brandKaduna}
+            >
+              KADUNA
+            </Text>
+
+
+            <Text
+              style={styles.brandOnly}
+            >
+              ONLY
+            </Text>
+
+
+            <Text
+              style={styles.tagline}
+            >
+              Your City. Your Ride.
+            </Text>
+
+          </View>
+
+
+          {/* =================================================
+              SPACER
+          ================================================= */}
+
+          <View
+            style={styles.middleSpace}
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
 
-        {Platform.OS === 'web' && <WebBadge />}
+
+          {/* =================================================
+              ACTIONS
+          ================================================= */}
+
+          <View
+            style={styles.actions}
+          >
+
+            {/* -----------------------------------------------
+                RIDER
+            ----------------------------------------------- */}
+
+            <Pressable
+              onPress={
+                continueAsRider
+              }
+              style={({ pressed }) => [
+                styles.riderButton,
+
+                pressed &&
+                  styles.buttonPressed,
+              ]}
+            >
+
+              <Text
+                style={
+                  styles.riderButtonText
+                }
+              >
+                Continue as Rider
+              </Text>
+
+            </Pressable>
+
+
+            {/* -----------------------------------------------
+                DRIVER
+            ----------------------------------------------- */}
+
+            <Pressable
+              onPress={
+                continueAsDriver
+              }
+              style={({ pressed }) => [
+                styles.driverButton,
+
+                pressed &&
+                  styles.buttonPressed,
+              ]}
+            >
+
+              <Text
+                style={
+                  styles.driverButtonText
+                }
+              >
+                Continue as Driver
+              </Text>
+
+            </Pressable>
+
+
+            {/* -----------------------------------------------
+                REGISTER
+            ----------------------------------------------- */}
+
+            <Pressable
+              onPress={
+                createAccount
+              }
+              style={styles.registerButton}
+            >
+
+              <Text
+                style={
+                  styles.registerText
+                }
+              >
+                New here?{' '}
+                <Text
+                  style={
+                    styles.registerTextStrong
+                  }
+                >
+                  Create an account
+                </Text>
+              </Text>
+
+            </Pressable>
+
+          </View>
+
+        </View>
+
       </SafeAreaView>
-    </ThemedView>
+
+    </View>
+
   );
+
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
-});
+
+/*
+=========================================================
+STYLES
+=========================================================
+*/
+
+const styles =
+  StyleSheet.create({
+
+    /*
+    -------------------------------------------------------
+    SCREEN
+    -------------------------------------------------------
+    */
+
+    screen: {
+
+      flex: 1,
+
+      backgroundColor:
+        BrandColors.primary,
+
+    },
+
+
+    safeArea: {
+
+      flex: 1,
+
+    },
+
+
+    container: {
+
+      flex: 1,
+
+      paddingHorizontal:
+        30,
+
+      paddingTop:
+        55,
+
+      paddingBottom:
+        30,
+
+    },
+
+
+    /*
+    -------------------------------------------------------
+    BRAND
+    -------------------------------------------------------
+    */
+
+    brandArea: {
+
+      alignItems:
+        'center',
+
+      marginTop:
+        35,
+
+    },
+
+
+    /*
+    -------------------------------------------------------
+    LOGO MARK
+    -------------------------------------------------------
+    */
+
+    logoMark: {
+
+      width:
+        70,
+
+      height:
+        68,
+
+      position:
+        'relative',
+
+      marginBottom:
+        14,
+
+    },
+
+
+    logoTowerLeft: {
+
+      position:
+        'absolute',
+
+      left:
+        6,
+
+      bottom:
+        8,
+
+      width:
+        16,
+
+      height:
+        39,
+
+      borderTopLeftRadius:
+        7,
+
+      borderTopRightRadius:
+        7,
+
+      backgroundColor:
+        BrandColors.warning,
+
+    },
+
+
+    logoTowerCenter: {
+
+      position:
+        'absolute',
+
+      left:
+        27,
+
+      bottom:
+        4,
+
+      width:
+        17,
+
+      height:
+        48,
+
+      borderTopLeftRadius:
+        8,
+
+      borderTopRightRadius:
+        8,
+
+      backgroundColor:
+        BrandColors.warning,
+
+    },
+
+
+    logoTowerRight: {
+
+      position:
+        'absolute',
+
+      right:
+        5,
+
+      bottom:
+        8,
+
+      width:
+        16,
+
+      height:
+        39,
+
+      borderTopLeftRadius:
+        7,
+
+      borderTopRightRadius:
+        7,
+
+      backgroundColor:
+        BrandColors.warning,
+
+    },
+
+
+    /*
+    -------------------------------------------------------
+    BRAND TEXT
+    -------------------------------------------------------
+    */
+
+    brandKaduna: {
+
+      fontSize:
+        29,
+
+      lineHeight:
+        31,
+
+      fontWeight:
+        '900',
+
+      letterSpacing:
+        1.1,
+
+      color:
+        BrandColors.white,
+
+    },
+
+
+    brandOnly: {
+
+      fontSize:
+        29,
+
+      lineHeight:
+        31,
+
+      fontWeight:
+        '900',
+
+      letterSpacing:
+        1.1,
+
+      color:
+        BrandColors.warning,
+
+    },
+
+
+    tagline: {
+
+      marginTop:
+        8,
+
+      fontSize:
+        14,
+
+      fontWeight:
+        '500',
+
+      color:
+        BrandColors.white,
+
+      opacity:
+        0.95,
+
+    },
+
+
+    /*
+    -------------------------------------------------------
+    SPACING
+    -------------------------------------------------------
+    */
+
+    middleSpace: {
+
+      flex: 1,
+
+    },
+
+
+    /*
+    -------------------------------------------------------
+    ACTIONS
+    -------------------------------------------------------
+    */
+
+    actions: {
+
+      width:
+        '100%',
+
+      alignItems:
+        'center',
+
+    },
+
+
+    /*
+    -------------------------------------------------------
+    RIDER BUTTON
+    -------------------------------------------------------
+    */
+
+    riderButton: {
+
+      width:
+        '100%',
+
+      height:
+        54,
+
+      borderRadius:
+        11,
+
+      backgroundColor:
+        BrandColors.warning,
+
+      alignItems:
+        'center',
+
+      justifyContent:
+        'center',
+
+      marginBottom:
+        10,
+
+    },
+
+
+    riderButtonText: {
+
+      fontSize:
+        15,
+
+      fontWeight:
+        '800',
+
+      color:
+        '#171717',
+
+    },
+
+
+    /*
+    -------------------------------------------------------
+    DRIVER BUTTON
+    -------------------------------------------------------
+    */
+
+    driverButton: {
+
+      width:
+        '100%',
+
+      height:
+        54,
+
+      borderRadius:
+        11,
+
+      borderWidth:
+        1,
+
+      borderColor:
+        BrandColors.white,
+
+      alignItems:
+        'center',
+
+      justifyContent:
+        'center',
+
+      backgroundColor:
+        'transparent',
+
+    },
+
+
+    driverButtonText: {
+
+      fontSize:
+        15,
+
+      fontWeight:
+        '700',
+
+      color:
+        BrandColors.white,
+
+    },
+
+
+    /*
+    -------------------------------------------------------
+    REGISTER
+    -------------------------------------------------------
+    */
+
+    registerButton: {
+
+      marginTop:
+        24,
+
+      paddingVertical:
+        8,
+
+    },
+
+
+    registerText: {
+
+      fontSize:
+        13,
+
+      color:
+        BrandColors.white,
+
+      opacity:
+        0.92,
+
+    },
+
+
+    registerTextStrong: {
+
+      fontWeight:
+        '800',
+
+      color:
+        BrandColors.white,
+
+    },
+
+
+    /*
+    -------------------------------------------------------
+    PRESS
+    -------------------------------------------------------
+    */
+
+    buttonPressed: {
+
+      opacity:
+        0.82,
+
+      transform: [
+        {
+          scale:
+            0.985,
+        },
+      ],
+
+    },
+
+  });
