@@ -41,6 +41,10 @@ import {
   disconnectSocket,
 } from '../../services/socket';
 
+import {
+  playRideRequestSound,
+} from '../../utils/tripSounds';
+
 
 /*
 =========================================================
@@ -552,40 +556,48 @@ export default function DriverHome() {
     -------------------------------------------------------
     */
 
-    const refreshFromRealtime =
-      (
-        eventName: string,
-        payload?: any
-      ) => {
+   const refreshFromRealtime =
+  (
+    eventName: string,
+    payload?: any
+  ) => {
 
-        console.log(
-          `[DRIVER SOCKET] ${eventName}`,
-          payload?.trip?._id ||
-          payload?._id ||
-          null,
+    console.log(
+      `[DRIVER SOCKET] ${eventName}`,
+      payload?.trip?._id ||
+      payload?._id ||
+      null,
 
-          payload?.trip?.status ||
-          payload?.status ||
-          null
-        );
+      payload?.trip?.status ||
+      payload?.status ||
+      null
+    );
 
 
-        if (
-          mounted
-        ) {
+    if (
+      !mounted
+    ) {
 
-          /*
-          * Database remains authoritative.
-          */
+      return;
 
-          loadDashboard(
-            false
-          );
+    }
 
-        }
 
-      };
+    /*
+    =====================================================
+    DATABASE REFRESH
+    =====================================================
+    *
+    * The database remains authoritative for normal trip
+    * updates, but the NEW RIDE REQUEST handler already
+    * places the incoming socket trip into the UI.
+    */
 
+    loadDashboard(
+      false
+    );
+
+  };
 
     /*
     -------------------------------------------------------
@@ -661,7 +673,7 @@ export default function DriverHome() {
         );
 
 
-        /*
+               /*
         ===================================================
         NEW RIDE REQUEST
         ===================================================
@@ -669,6 +681,175 @@ export default function DriverHome() {
 
         const handleNewTrip =
           (payload: any) => {
+
+            console.log(
+              '[DRIVER SOCKET] NEW RIDE REQUEST RECEIVED:',
+              payload
+            );
+
+
+            /*
+            ===================================================
+            EXTRACT INCOMING TRIP
+            ===================================================
+            */
+
+            const incomingTrip =
+              payload?.trip ||
+              payload?.data?.trip ||
+              payload;
+
+
+            const tripId =
+              incomingTrip?._id ||
+              incomingTrip?.tripId ||
+              payload?.tripId ||
+              null;
+
+
+            /*
+            ===================================================
+            PLAY DRIVER RIDE REQUEST SOUND
+            ===================================================
+            */
+
+            playRideRequestSound(
+              tripId
+                ? String(tripId)
+                : undefined
+            );
+
+
+            /*
+            ===================================================
+            IMMEDIATELY UPDATE DRIVER HOME
+            ===================================================
+            *
+            * Do not wait for the dashboard API.
+            * The socket payload already contains the new trip.
+            */
+
+            if (
+              incomingTrip &&
+              (
+                incomingTrip._id ||
+                incomingTrip.tripId
+              )
+            ) {
+
+              setDashboard(
+                previous => {
+
+                  /*
+                  -------------------------------------------------
+                  If dashboard has not loaded yet, create the
+                  minimum dashboard state required to display
+                  the active trip.
+                  -------------------------------------------------
+                  */
+
+                  if (!previous) {
+
+                    return {
+                      activeTrip:
+                        incomingTrip,
+
+                    } as Dashboard;
+
+                  }
+
+
+                  /*
+                  -------------------------------------------------
+                  Preserve every existing dashboard field while
+                  replacing activeTrip with the realtime trip.
+                  -------------------------------------------------
+                  */
+
+                  return {
+                    ...previous,
+
+                    activeTrip:
+                      incomingTrip,
+
+                  };
+
+                }
+              );
+
+
+              console.log(
+                '[DRIVER HOME] Active trip updated immediately:',
+                tripId
+              );
+
+            }
+
+
+            /*
+            ===================================================
+            SHOW NEW RIDE NOTIFICATION
+            ===================================================
+            */
+
+            const pickup =
+              incomingTrip?.pickup?.address ||
+              incomingTrip?.pickup?.label ||
+              'Pickup location';
+
+
+            const destination =
+              incomingTrip?.destination?.address ||
+              incomingTrip?.destination?.label ||
+              'Destination';
+
+
+            Alert.alert(
+              'New Ride Request',
+              `Pickup: ${pickup}\n\nDestination: ${destination}`,
+              [
+                {
+                  text: 'View Ride',
+                  onPress: () => {
+
+                    if (tripId) {
+
+                      router.push(
+                        `/driver/trip?tripId=${encodeURIComponent(
+                          String(tripId)
+                        )}`
+                      );
+
+                    }
+
+                  },
+                },
+
+                {
+                  text: 'OK',
+                  style: 'cancel',
+                },
+
+              ]
+            );
+
+
+            console.log(
+              '[DRIVER HOME] New ride notification shown'
+            );
+
+
+            /*
+            ===================================================
+            BACKEND REFRESH
+            ===================================================
+            *
+            * Database remains authoritative.
+            *
+            * This refresh happens after the immediate realtime
+            * UI update and protects against incomplete socket
+            * payloads or stale local state.
+            */
 
             refreshFromRealtime(
               'NEW RIDE REQUEST',
@@ -686,6 +867,14 @@ export default function DriverHome() {
 
         const handleTripUpdated =
           (payload: any) => {
+
+            console.log(
+              '[DRIVER SOCKET] TRIP UPDATED:',
+              payload?.trip?._id ||
+              payload?._id ||
+              null
+            );
+
 
             refreshFromRealtime(
               'TRIP UPDATED',
@@ -707,6 +896,14 @@ export default function DriverHome() {
         const handleTripUpdate =
           (payload: any) => {
 
+            console.log(
+              '[DRIVER SOCKET] TRIP UPDATE:',
+              payload?.trip?._id ||
+              payload?._id ||
+              null
+            );
+
+
             refreshFromRealtime(
               'TRIP UPDATE',
               payload
@@ -723,6 +920,15 @@ export default function DriverHome() {
 
         const handleTripTaken =
           (payload: any) => {
+
+            console.log(
+              '[DRIVER SOCKET] TRIP TAKEN:',
+              payload?.trip?._id ||
+              payload?.tripId ||
+              payload?._id ||
+              null
+            );
+
 
             refreshFromRealtime(
               'TRIP TAKEN',
@@ -747,6 +953,15 @@ export default function DriverHome() {
         const handleDestinationConfirmed =
           (payload: any) => {
 
+            console.log(
+              '[DRIVER SOCKET] RIDER CONFIRMED ARRIVAL:',
+              payload?.trip?._id ||
+              payload?.tripId ||
+              payload?._id ||
+              null
+            );
+
+
             refreshFromRealtime(
               'RIDER CONFIRMED ARRIVAL',
               payload
@@ -763,6 +978,15 @@ export default function DriverHome() {
 
         const handleCompletionRequest =
           (payload: any) => {
+
+            console.log(
+              '[DRIVER SOCKET] COMPLETION REQUEST:',
+              payload?.trip?._id ||
+              payload?.tripId ||
+              payload?._id ||
+              null
+            );
+
 
             refreshFromRealtime(
               'COMPLETION REQUEST',
@@ -786,6 +1010,13 @@ export default function DriverHome() {
               socket?.id
             );
 
+
+            /*
+            -------------------------------------------------
+            Refresh after connection so the driver's screen
+            is synchronized with the database.
+            -------------------------------------------------
+            */
 
             if (
               mounted
@@ -817,6 +1048,12 @@ export default function DriverHome() {
             );
 
 
+            /*
+            -------------------------------------------------
+            Re-sync dashboard after temporary network loss.
+            -------------------------------------------------
+            */
+
             if (
               mounted
             ) {
@@ -828,8 +1065,6 @@ export default function DriverHome() {
             }
 
           };
-
-
         /*
         ===================================================
         REGISTER EVENTS

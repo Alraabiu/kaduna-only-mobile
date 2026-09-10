@@ -1,44 +1,25 @@
 ﻿import { io, Socket } from 'socket.io-client';
-
 import { getStoredToken } from '../storage/auth';
 
-
-
-/*
-=========================================================
-KADUNA ONLY REALTIME SOCKET
-=========================================================
-*/
-
 const SOCKET_URL =
-  'https://kaduna-only-backend.onrender.com';
+  'https://kaduna-only-737d.onrender.com';
 
 let socket: Socket | null = null;
-
 let socketToken: string | null = null;
 
-
 export async function connectSocket(): Promise<Socket | null> {
-
   try {
-
-    const token =
-      await getStoredToken();
+    const token = await getStoredToken();
 
     if (!token) {
-
-      console.log(
-        '[SOCKET] No authentication token'
-      );
-
+      console.log('[SOCKET] No authentication token');
       return null;
-
     }
 
     /*
-    -------------------------------------------------------
-    Reuse an existing connected socket
-    -------------------------------------------------------
+    =======================================================
+    REUSE CONNECTED SOCKET
+    =======================================================
     */
 
     if (
@@ -46,21 +27,23 @@ export async function connectSocket(): Promise<Socket | null> {
       socket.connected &&
       socketToken === token
     ) {
-
       console.log(
         '[SOCKET] Reusing authenticated socket'
       );
 
       return socket;
-
     }
+
+    /*
+    =======================================================
+    TOKEN CHANGED
+    =======================================================
+    */
 
     if (
       socket &&
-      socket.connected &&
       socketToken !== token
     ) {
-
       console.log(
         '[SOCKET] Authentication token changed. Reconnecting socket.'
       );
@@ -70,205 +53,170 @@ export async function connectSocket(): Promise<Socket | null> {
 
       socket = null;
       socketToken = null;
-
     }
 
     /*
-    -------------------------------------------------------
-    Reuse an existing socket that is still connecting
-    -------------------------------------------------------
+    =======================================================
+    EXISTING SOCKET STILL CONNECTING
+    =======================================================
     */
 
     if (socket) {
+      const currentSocket = socket;
 
       await new Promise<void>((resolve) => {
-
-        const currentSocket = socket;
-
-        if (!currentSocket) {
-
+        if (currentSocket.connected) {
           resolve();
-
           return;
-
         }
 
-        const timeout =
-          setTimeout(() => {
+        const timeout = setTimeout(() => {
+          resolve();
+        }, 10000);
 
-            resolve();
-
-          }, 10000);
-
-        currentSocket.once(
-          'connect',
-          () => {
-
-            clearTimeout(
-              timeout
-            );
-
-            resolve();
-
-          }
-        );
-
+        currentSocket.once('connect', () => {
+          clearTimeout(timeout);
+          resolve();
+        });
       });
 
       return socket?.connected
         ? socket
         : null;
-
     }
 
     /*
-    -------------------------------------------------------
-    Create Socket.IO connection
-    -------------------------------------------------------
+    =======================================================
+    CREATE SOCKET
+    =======================================================
     */
 
     socketToken = token;
 
-
     console.log(
-
       '[SOCKET] Creating authenticated socket'
-
     );
 
+    socket = io(
+      SOCKET_URL,
+      {
+        transports: [
+          'websocket',
+          'polling',
+        ],
 
-    socket =
-      io(
-        SOCKET_URL,
-        {
-          transports: [
-            'websocket',
-          ],
+        auth: {
+          token,
+        },
 
-          auth: {
-            token,
-          },
+        autoConnect: true,
 
-          autoConnect: true,
+        reconnection: true,
 
-          reconnection: true,
+        reconnectionAttempts: Infinity,
 
-          reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
 
-          reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
 
-          reconnectionDelayMax: 5000,
-        }
-      );
+        timeout: 10000,
+      }
+    );
 
     /*
-    -------------------------------------------------------
-    Connection events
-    -------------------------------------------------------
+    =======================================================
+    CONNECTION EVENTS
+    =======================================================
     */
 
     socket.on(
       'connect',
       () => {
-
         console.log(
           '[SOCKET] Connected:',
           socket?.id
         );
-
       }
     );
 
     socket.on(
       'disconnect',
       reason => {
-
         console.log(
           '[SOCKET] Disconnected:',
           reason
         );
-
       }
     );
 
     socket.on(
       'connect_error',
       error => {
-
         console.log(
           '[SOCKET] Connection error:',
           error.message
         );
-
       }
     );
 
-    socket.on(
+    socket.io.on(
+      'reconnect_attempt',
+      attempt => {
+        console.log(
+          '[SOCKET] Reconnect attempt:',
+          attempt
+        );
+      }
+    );
+
+    socket.io.on(
       'reconnect',
       attempt => {
-
         console.log(
           '[SOCKET] Reconnected:',
           attempt
         );
-
       }
     );
 
     /*
-    -------------------------------------------------------
-    WAIT FOR ACTUAL CONNECTION
-    -------------------------------------------------------
+    =======================================================
+    WAIT FOR CONNECTION
+    =======================================================
     */
 
-    if (
-      socket.connected
-    ) {
-
+    if (socket.connected) {
       return socket;
-
     }
 
+    const currentSocket = socket;
+
     await new Promise<void>((resolve) => {
-
-      const currentSocket = socket;
-
       if (!currentSocket) {
-
         resolve();
-
         return;
-
       }
 
-      const timeout =
-        setTimeout(() => {
+      if (currentSocket.connected) {
+        resolve();
+        return;
+      }
 
-          resolve();
-
-        }, 10000);
+      const timeout = setTimeout(() => {
+        resolve();
+      }, 10000);
 
       currentSocket.once(
         'connect',
         () => {
-
-          clearTimeout(
-            timeout
-          );
-
+          clearTimeout(timeout);
           resolve();
-
         }
       );
-
     });
 
-    if (
-      socket?.connected
-    ) {
-
+    if (socket?.connected) {
       return socket;
-
     }
 
     console.log(
@@ -285,9 +233,7 @@ export async function connectSocket(): Promise<Socket | null> {
     );
 
     return null;
-
   }
-
 }
 
 /*
@@ -297,11 +243,8 @@ GET SOCKET
 */
 
 export function getSocket(): Socket | null {
-
   return socket;
-
 }
-
 
 /*
 =========================================================
@@ -315,20 +258,17 @@ export function disconnectSocket(): void {
     return;
   }
 
-
   console.log(
     '[SOCKET] Disconnecting'
   );
-
 
   socket.removeAllListeners();
 
   socket.disconnect();
 
   socket = null;
-
+  socketToken = null;
 }
-
 
 /*
 =========================================================
@@ -341,28 +281,29 @@ export function emitSocket(
   data?: any
 ): void {
 
-  if (
-    !socket ||
-    !socket.connected
-  ) {
-
+  if (!socket) {
     console.log(
-      '[SOCKET] Cannot emit, socket not connected:',
+      '[SOCKET] Cannot emit, socket does not exist:',
       event
     );
 
     return;
-
   }
 
+  if (!socket.connected) {
+    console.log(
+      '[SOCKET] Socket not connected yet, cannot emit:',
+      event
+    );
+
+    return;
+  }
 
   socket.emit(
     event,
     data
   );
-
 }
-
 
 /*
 =========================================================
@@ -375,29 +316,34 @@ export function onSocket(
   callback: (...args: any[]) => void
 ): () => void {
 
+  /*
+  IMPORTANT:
+  Do NOT require socket.connected here.
+
+  Socket.IO can register listeners while the socket
+  is still connecting. This prevents events such as
+  trip:new and destination:confirmed from being lost.
+  */
+
   if (!socket) {
 
     console.log(
-      '[SOCKET] Cannot listen before connection:',
+      '[SOCKET] Cannot listen because socket does not exist:',
       event
     );
 
     return () => {};
-
   }
-
 
   socket.on(
     event,
     callback
   );
 
-
-  /*
-  -------------------------------------------------------
-  Return cleanup function
-  -------------------------------------------------------
-  */
+  console.log(
+    '[SOCKET] Listener registered:',
+    event
+  );
 
   return () => {
 
@@ -406,6 +352,9 @@ export function onSocket(
       callback
     );
 
+    console.log(
+      '[SOCKET] Listener removed:',
+      event
+    );
   };
-
 }
