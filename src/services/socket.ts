@@ -11,8 +11,7 @@ KADUNA ONLY REALTIME SOCKET
 */
 
 const SOCKET_URL =
-  'https://YOUR-RENDER-BACKEND.onrender.com';
-
+  'https://kaduna-only-backend.onrender.com';
 
 let socket: Socket | null = null;
 
