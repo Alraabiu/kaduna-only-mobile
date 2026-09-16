@@ -1,12 +1,15 @@
-import React, {
-  useCallback,
-  useEffect,
+
+  import {
+    useCallback,
+  useMemo,
+  useRef,
   useState,
 } from 'react';
 
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   RefreshControl,
   SafeAreaView,
@@ -18,9 +21,18 @@ import {
 
 import {
   router,
-  useLocalSearchParams,
   useFocusEffect,
+  useLocalSearchParams,
 } from 'expo-router';
+
+import { Ionicons } from '@expo/vector-icons';
+
+import MapView, {
+  Marker,
+  Polyline,
+  PROVIDER_DEFAULT,
+  PROVIDER_GOOGLE,
+} from 'react-native-maps';
 
 import api, {
   setAuthToken,
@@ -60,6 +72,15 @@ type LocationPoint = {
 type DriverLocation = {
   latitude?: number;
   longitude?: number;
+  lat?: number;
+  lng?: number;
+  heading?: number;
+  accuracy?: number;
+};
+
+type MapPoint = {
+  latitude: number;
+  longitude: number;
 };
 
 type Trip = {
@@ -92,6 +113,7 @@ type Trip = {
   routingSource?: string;
   pricingBasis?: string;
   pricingVersion?: string;
+  routeGeometry?: any;
 
   kekeRideType?: string;
   passengerCapacity?: number;
@@ -106,6 +128,33 @@ type Trip = {
 
   [key: string]: any;
 };
+
+
+/*
+=========================================================
+COLORS
+=========================================================
+*/
+
+const PURPLE =
+  BrandColors.primary ||
+  '#4B24A8';
+
+const WHITE = '#FFFFFF';
+const TEXT = BrandColors.text || '#202124';
+const MUTED =
+  BrandColors.textSecondary ||
+  '#777A82';
+
+const BACKGROUND =
+  BrandColors.background ||
+  '#F7F7FA';
+
+const BORDER = '#E8E6ED';
+const SOFT_PURPLE = '#F2EEFF';
+const RED = '#D94B4B';
+const GREEN = '#159A63';
+const GOLD = '#F5B800';
 
 
 /*
@@ -144,7 +193,7 @@ function formatStatus(
 }
 
 
-function formatPaymentMethod(
+function formatValue(
   value?: string
 ): string {
 
@@ -154,6 +203,7 @@ function formatPaymentMethod(
 
   return value
     .replace(/_/g, ' ')
+    .toLowerCase()
     .replace(/\b\w/g, char =>
       char.toUpperCase()
     );
@@ -178,6 +228,76 @@ function getLocationLabel(
 }
 
 
+function getCoordinate(
+  location?: LocationPoint
+): MapPoint | null {
+
+  if (!location) {
+    return null;
+  }
+
+  const latitude =
+    Number(
+      location.latitude ??
+      location.lat
+    );
+
+  const longitude =
+    Number(
+      location.longitude ??
+      location.lng
+    );
+
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude)
+  ) {
+    return null;
+  }
+
+  return {
+    latitude,
+    longitude,
+  };
+
+}
+
+
+function getDriverCoordinate(
+  location?: DriverLocation | null
+): MapPoint | null {
+
+  if (!location) {
+    return null;
+  }
+
+  const latitude =
+    Number(
+      location.latitude ??
+      location.lat
+    );
+
+  const longitude =
+    Number(
+      location.longitude ??
+      location.lng
+    );
+
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude)
+  ) {
+    return null;
+  }
+
+  return {
+    latitude,
+    longitude,
+  };
+
+}
+
+
 function getStatusMessage(
   status?: string
 ): string {
@@ -185,30 +305,270 @@ function getStatusMessage(
   switch (status) {
 
     case 'SEARCHING_DRIVER':
-      return 'We are finding a driver for your ride.';
+      return 'Finding a nearby driver for your ride.';
 
     case 'DRIVER_ASSIGNED':
-      return 'A driver has accepted your ride.';
+      return 'Your driver has accepted the ride.';
 
     case 'DRIVER_ARRIVING':
-      return 'Your driver is on the way to the pickup point.';
+      return 'Your driver is heading to your pickup.';
 
     case 'DRIVER_ARRIVED':
       return 'Your driver has arrived at the pickup point.';
 
     case 'TRIP_STARTED':
-      return 'Your trip is currently in progress.';
+      return 'You are currently on the way to your destination.';
 
     case 'COMPLETED':
-      return 'Your trip has been completed.';
+      return 'This ride has been completed.';
 
     case 'CANCELLED':
-      return 'This trip has been cancelled.';
+      return 'This ride was cancelled.';
 
     default:
       return 'Trip status is being updated.';
 
   }
+
+}
+
+
+function getStatusIcon(
+  status?: string
+): keyof typeof Ionicons.glyphMap {
+
+  switch (status) {
+
+    case 'SEARCHING_DRIVER':
+      return 'search';
+
+    case 'DRIVER_ASSIGNED':
+    case 'DRIVER_ARRIVING':
+      return 'car-sport';
+
+    case 'DRIVER_ARRIVED':
+      return 'location';
+
+    case 'TRIP_STARTED':
+      return 'navigate';
+
+    case 'COMPLETED':
+      return 'checkmark-circle';
+
+    case 'CANCELLED':
+      return 'close-circle';
+
+    default:
+      return 'time';
+
+  }
+
+}
+
+
+function getStatusColor(
+  status?: string
+): string {
+
+  switch (status) {
+
+    case 'COMPLETED':
+      return GREEN;
+
+    case 'CANCELLED':
+      return RED;
+
+    case 'DRIVER_ARRIVED':
+      return GOLD;
+
+    default:
+      return PURPLE;
+
+  }
+
+}
+
+
+function getVehicleIcon(
+  vehicleType?: string
+): keyof typeof Ionicons.glyphMap {
+
+  switch (
+    String(vehicleType || '')
+      .toLowerCase()
+  ) {
+
+    case 'motorcycle':
+      return 'bicycle';
+
+    case 'car':
+      return 'car-sport';
+
+    default:
+      return 'bus';
+
+  }
+
+}
+
+
+function routeCoordinates(
+  geometry: any
+): MapPoint[] {
+
+  if (!geometry) {
+    return [];
+  }
+
+  let raw =
+    geometry;
+
+  if (
+    raw &&
+    typeof raw === 'object' &&
+    !Array.isArray(raw)
+  ) {
+
+    if (raw.geometry) {
+      raw = raw.geometry;
+    }
+
+    if (raw.coordinates) {
+      raw = raw.coordinates;
+    }
+
+  }
+
+
+  const points: MapPoint[] =
+    [];
+
+
+  const walk =
+    (value: any) => {
+
+      if (!Array.isArray(value)) {
+        return;
+      }
+
+
+      if (
+        value.length >= 2 &&
+        typeof value[0] === 'number' &&
+        typeof value[1] === 'number'
+      ) {
+
+        points.push({
+          latitude:
+            Number(value[1]),
+          longitude:
+            Number(value[0]),
+        });
+
+        return;
+
+      }
+
+
+      value.forEach(
+        walk
+      );
+
+    };
+
+
+  walk(raw);
+
+
+  return points.filter(
+    point =>
+      Number.isFinite(
+        point.latitude
+      ) &&
+      Number.isFinite(
+        point.longitude
+      ) &&
+      Math.abs(
+        point.latitude
+      ) <= 90 &&
+      Math.abs(
+        point.longitude
+      ) <= 180
+  );
+
+}
+
+
+/*
+=========================================================
+SMALL COMPONENTS
+=========================================================
+*/
+
+function DetailRow({
+  icon,
+  label,
+  value,
+  last = false,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+  last?: boolean;
+}) {
+
+  return (
+
+    <View
+      style={[
+        styles.detailRow,
+        last &&
+        styles.detailRowLast,
+      ]}
+    >
+
+      <View
+        style={
+          styles.detailIcon
+        }
+      >
+
+        <Ionicons
+          name={icon}
+          size={18}
+          color={PURPLE}
+        />
+
+      </View>
+
+
+      <View
+        style={
+          styles.detailCopy
+        }
+      >
+
+        <Text
+          style={
+            styles.detailLabel
+          }
+        >
+          {label}
+        </Text>
+
+        <Text
+          style={
+            styles.detailValue
+          }
+        >
+          {value}
+        </Text>
+
+      </View>
+
+    </View>
+
+  );
 
 }
 
@@ -228,45 +588,80 @@ export default function TripDetails() {
 
 
   const tripId =
-    Array.isArray(params.id)
+    Array.isArray(
+      params.id
+    )
       ? params.id[0]
       : params.id;
+
+
+  const mapRef =
+    useRef<MapView | null>(
+      null
+    );
 
 
   const [
     trip,
     setTrip,
-  ] = useState<Trip | null>(
-    null
-  );
+  ] =
+    useState<Trip | null>(
+      null
+    );
 
 
   const [
     driverLocation,
     setDriverLocation,
-  ] = useState<DriverLocation | null>(
-    null
-  );
+  ] =
+    useState<DriverLocation | null>(
+      null
+    );
 
 
   const [
     loading,
     setLoading,
-  ] = useState(true);
+  ] =
+    useState<boolean>(
+      true
+    );
 
 
   const [
     refreshing,
     setRefreshing,
-  ] = useState(false);
+  ] =
+    useState<boolean>(
+      false
+    );
+
+
+  const [
+    cancelling,
+    setCancelling,
+  ] =
+    useState<boolean>(
+      false
+    );
 
 
   const [
     error,
     setError,
-  ] = useState<string | null>(
-    null
-  );
+  ] =
+    useState<string | null>(
+      null
+    );
+
+
+  const [
+    mapReady,
+    setMapReady,
+  ] =
+    useState<boolean>(
+      false
+    );
 
 
   /*
@@ -279,6 +674,7 @@ export default function TripDetails() {
 
     const token =
       await getStoredToken();
+
 
     if (!token) {
 
@@ -300,7 +696,10 @@ export default function TripDetails() {
 
     }
 
-    setAuthToken(token);
+
+    setAuthToken(
+      token
+    );
 
     return true;
 
@@ -325,7 +724,9 @@ export default function TripDetails() {
             'No trip ID was provided.'
           );
 
-          setLoading(false);
+          setLoading(
+            false
+          );
 
           return;
 
@@ -335,11 +736,15 @@ export default function TripDetails() {
         try {
 
           if (showLoader) {
-            setLoading(true);
+            setLoading(
+              true
+            );
           }
 
 
-          setError(null);
+          setError(
+            null
+          );
 
 
           console.log(
@@ -396,19 +801,37 @@ export default function TripDetails() {
           );
 
 
-          const message =
-            e?.response?.data?.message ||
-            'Unable to load this trip.';
+          if (
+            e?.response?.status ===
+            401
+          ) {
+
+            setAuthToken();
+
+            router.replace(
+              '/login' as any
+            );
+
+            return;
+
+          }
 
 
           setError(
-            message
+            e?.response?.data?.message ||
+            'Unable to load this trip.'
           );
+
 
         } finally {
 
-          setLoading(false);
-          setRefreshing(false);
+          setLoading(
+            false
+          );
+
+          setRefreshing(
+            false
+          );
 
         }
 
@@ -443,26 +866,167 @@ export default function TripDetails() {
 
   /*
   =======================================================
-  REFRESH
+  DERIVED MAP DATA
+  =======================================================
+  */
+
+  const pickupCoordinate: MapPoint | null =
+    getCoordinate(
+      trip?.pickup
+    );
+
+
+  const destinationCoordinate: MapPoint | null =
+    getCoordinate(
+      trip?.destination
+    );
+
+
+  const driverCoordinate: MapPoint | null =
+    getDriverCoordinate(
+      driverLocation
+    );
+
+
+  const routePoints: MapPoint[] =
+    routeCoordinates(
+      trip?.routeGeometry
+    );
+
+
+  const mapCoordinates: MapPoint[] =
+    useMemo<MapPoint[]>(
+      () => {
+
+        const points: MapPoint[] =
+          [];
+
+
+        if (
+          routePoints.length > 1
+        ) {
+
+          points.push(
+            ...routePoints
+          );
+
+        } else {
+
+          if (
+            pickupCoordinate
+          ) {
+
+            points.push(
+              pickupCoordinate
+            );
+
+          }
+
+
+          if (
+            destinationCoordinate
+          ) {
+
+            points.push(
+              destinationCoordinate
+            );
+
+          }
+
+        }
+
+
+        if (
+          driverCoordinate
+        ) {
+
+          points.push(
+            driverCoordinate
+          );
+
+        }
+
+
+        return points;
+
+      },
+      [
+        routePoints,
+        pickupCoordinate,
+        destinationCoordinate,
+        driverCoordinate,
+      ]
+    );
+
+
+  useFocusEffect(
+    useCallback(
+      () => {
+
+        if (
+          !mapReady ||
+          mapCoordinates.length <
+          2
+        ) {
+          return;
+        }
+
+
+        const timer =
+          setTimeout(
+            () => {
+
+              mapRef.current
+                ?.fitToCoordinates(
+                  mapCoordinates,
+                  {
+                    edgePadding: {
+                      top: 90,
+                      right: 45,
+                      bottom: 70,
+                      left: 45,
+                    },
+                    animated: true,
+                  }
+                );
+
+            },
+            250
+          );
+
+
+        return () =>
+          clearTimeout(
+            timer
+          );
+
+      },
+      [
+        mapReady,
+        mapCoordinates,
+      ]
+    )
+  );
+
+
+  /*
+  =======================================================
+  ACTIONS
   =======================================================
   */
 
   async function refreshTrip() {
 
-    setRefreshing(true);
+    setRefreshing(
+      true
+    );
 
     await loadTrip(
-      false
+      
     );
 
   }
 
-
-  /*
-  =======================================================
-  BACK
-  =======================================================
-  */
 
   function goBack() {
 
@@ -476,9 +1040,189 @@ export default function TripDetails() {
 
     }
 
+
     router.replace(
       '/trips' as any
     );
+
+  }
+
+
+  function confirmCancelTrip() {
+
+    if (
+      !tripId ||
+      !trip ||
+      cancelling
+    ) {
+      return;
+    }
+
+
+    Alert.alert(
+      'Cancel this ride?',
+      trip.paymentMethod === 'wallet'
+        ? 'Your booking will be cancelled. Any reserved wallet payment will be handled by the server refund process.'
+        : 'Your booking will be cancelled and the driver will no longer be assigned to this request.',
+      [
+        {
+          text: 'Keep Ride',
+          style: 'cancel',
+        },
+        {
+          text: 'Cancel Ride',
+          style: 'destructive',
+          onPress: cancelTrip,
+        },
+      ]
+    );
+
+  }
+
+
+  async function cancelTrip() {
+
+    if (
+      !tripId ||
+      cancelling
+    ) {
+      return;
+    }
+
+
+    try {
+
+      setCancelling(
+        true
+      );
+
+
+      const authenticated =
+        await prepareAuthentication();
+
+
+      if (!authenticated) {
+        return;
+      }
+
+
+      const response =
+        await api.patch(
+          `/trips/${tripId}/cancel`
+        );
+
+
+      const cancelledTrip =
+        response?.data?.data?.trip ||
+        response?.data?.trip ||
+        null;
+
+
+      if (cancelledTrip) {
+        setTrip(
+          cancelledTrip
+        );
+      } else {
+        await loadTrip(
+          false
+        );
+      }
+
+
+      setDriverLocation(
+        null
+      );
+
+
+      Alert.alert(
+        'Ride cancelled',
+        trip?.paymentMethod === 'wallet'
+          ? 'Your ride has been cancelled. If funds were reserved from your wallet, the backend refund process will restore them according to the trip record.'
+          : 'Your ride has been cancelled successfully.'
+      );
+
+    } catch (e: any) {
+
+      console.log(
+        '[RIDER TRIP CANCEL ERROR]',
+        e
+      );
+
+
+      if (
+        e?.response?.status ===
+        401
+      ) {
+
+        setAuthToken();
+
+        router.replace(
+          '/login' as any
+        );
+
+        return;
+
+      }
+
+
+      Alert.alert(
+        'Unable to cancel ride',
+        e?.response?.data?.message ||
+        'This ride cannot be cancelled at its current stage.'
+      );
+
+    } finally {
+
+      setCancelling(
+        false
+      );
+
+    }
+
+  }
+
+
+  function recenterMap() {
+
+    if (
+      mapCoordinates.length >=
+      2
+    ) {
+
+      mapRef.current
+        ?.fitToCoordinates(
+          mapCoordinates,
+          {
+            edgePadding: {
+              top: 90,
+              right: 45,
+              bottom: 70,
+              left: 45,
+            },
+            animated: true,
+          }
+        );
+
+      return;
+
+    }
+
+
+    if (
+      pickupCoordinate
+    ) {
+
+      mapRef.current
+        ?.animateToRegion(
+          {
+            ...pickupCoordinate,
+            latitudeDelta: 0.02,
+            longitudeDelta: 0.02,
+          },
+          350
+        );
+
+    }
 
   }
 
@@ -499,19 +1243,33 @@ export default function TripDetails() {
         }
       >
 
+        <View
+          style={
+            styles.loadingLogo
+          }
+        >
+
+          <Ionicons
+            name="navigate"
+            size={27}
+            color={WHITE}
+          />
+
+        </View>
+
+
         <ActivityIndicator
           size="large"
-          color={
-            BrandColors.primary
-          }
+          color={PURPLE}
         />
+
 
         <Text
           style={
             styles.loadingText
           }
         >
-          Loading trip...
+          Loading your ride...
         </Text>
 
       </SafeAreaView>
@@ -540,6 +1298,21 @@ export default function TripDetails() {
         }
       >
 
+        <View
+          style={
+            styles.errorIcon
+          }
+        >
+
+          <Ionicons
+            name="alert-circle-outline"
+            size={31}
+            color={RED}
+          />
+
+        </View>
+
+
         <Text
           style={
             styles.errorTitle
@@ -547,6 +1320,7 @@ export default function TripDetails() {
         >
           Trip unavailable
         </Text>
+
 
         <Text
           style={
@@ -559,9 +1333,10 @@ export default function TripDetails() {
           }
         </Text>
 
+
         <Pressable
           onPress={() =>
-            loadTrip(true)
+            loadTrip()
           }
           style={
             styles.retryButton
@@ -577,6 +1352,7 @@ export default function TripDetails() {
           </Text>
 
         </Pressable>
+
 
         <Pressable
           onPress={
@@ -608,9 +1384,10 @@ export default function TripDetails() {
     trip.status;
 
 
-  const isSearching =
-    status ===
-    'SEARCHING_DRIVER';
+  const normalizedStatus =
+    String(status || '')
+      .trim()
+      .toUpperCase();
 
 
   const hasDriver =
@@ -619,7 +1396,38 @@ export default function TripDetails() {
 
   /*
   =======================================================
-  MAIN SCREEN
+  RIDER CANCELLATION VISIBILITY
+  =======================================================
+  */
+
+  const canCancel =
+    [
+      'SEARCHING_DRIVER',
+      'DRIVER_ASSIGNED',
+      'DRIVER_ARRIVING',
+    ].includes(
+      normalizedStatus
+    );
+
+
+  const statusColor =
+    getStatusColor(
+      status
+    );
+
+
+  const mapInitialCoordinate =
+    pickupCoordinate ||
+    destinationCoordinate ||
+    {
+      latitude: 10.5222,
+      longitude: 7.4383,
+    };
+
+
+  /*
+  =======================================================
+  MAIN
   =======================================================
   */
 
@@ -638,6 +1446,9 @@ export default function TripDetails() {
         contentContainerStyle={
           styles.content
         }
+        showsVerticalScrollIndicator={
+          false
+        }
         refreshControl={
           <RefreshControl
             refreshing={
@@ -646,104 +1457,336 @@ export default function TripDetails() {
             onRefresh={
               refreshTrip
             }
+            tintColor={
+              PURPLE
+            }
+            colors={[
+              PURPLE,
+            ]}
           />
         }
       >
 
         {/* =================================================
-            HEADER
+            MAP HERO
         ================================================= */}
 
         <View
           style={
-            styles.header
+            styles.mapHero
           }
         >
 
-          <Pressable
-            onPress={
-              goBack
-            }
+          <MapView
+            ref={mapRef}
             style={
-              styles.backButton
+              StyleSheet.absoluteFill
+            }
+            provider={
+              Platform.OS ===
+              'android'
+                ? PROVIDER_GOOGLE
+                : PROVIDER_DEFAULT
+            }
+            initialRegion={{
+              latitude:
+                mapInitialCoordinate.latitude,
+              longitude:
+                mapInitialCoordinate.longitude,
+              latitudeDelta:
+                0.025,
+              longitudeDelta:
+                0.025,
+            }}
+            onMapReady={() =>
+              setMapReady(
+                true
+              )
+            }
+            showsCompass
+            showsScale={
+              false
+            }
+            showsUserLocation={
+              false
+            }
+            toolbarEnabled={
+              false
+            }
+            loadingEnabled
+            loadingIndicatorColor={
+              PURPLE
+            }
+            loadingBackgroundColor={
+              WHITE
             }
           >
 
-            <Text
+            {
+              routePoints.length >
+              1 &&
+              (
+                <Polyline
+                  coordinates={
+                    routePoints
+                  }
+                  strokeColor={
+                    PURPLE
+                  }
+                  strokeWidth={
+                    5
+                  }
+                  lineCap="round"
+                  lineJoin="round"
+                />
+              )
+            }
+
+
+            {
+              pickupCoordinate &&
+              (
+                <Marker
+                  coordinate={
+                    pickupCoordinate
+                  }
+                  title="Pickup"
+                  description={
+                    getLocationLabel(
+                      trip.pickup
+                    )
+                  }
+                >
+
+                  <View
+                    style={
+                      styles.pickupMarker
+                    }
+                  >
+
+                    <View
+                      style={
+                        styles.pickupMarkerInner
+                      }
+                    />
+
+                  </View>
+
+                </Marker>
+              )
+            }
+
+
+            {
+              destinationCoordinate &&
+              (
+                <Marker
+                  coordinate={
+                    destinationCoordinate
+                  }
+                  title="Destination"
+                  description={
+                    getLocationLabel(
+                      trip.destination
+                    )
+                  }
+                >
+
+                  <View
+                    style={
+                      styles.destinationMarker
+                    }
+                  >
+
+                    <Ionicons
+                      name="flag"
+                      size={15}
+                      color={WHITE}
+                    />
+
+                  </View>
+
+                </Marker>
+              )
+            }
+
+
+            {
+              driverCoordinate &&
+              hasDriver &&
+              (
+                <Marker
+                  coordinate={
+                    driverCoordinate
+                  }
+                  title={
+                    trip.driver?.fullName ||
+                    'Your driver'
+                  }
+                  description="Driver location"
+                  anchor={{
+                    x: 0.5,
+                    y: 0.5,
+                  }}
+                >
+
+                  <View
+                    style={
+                      styles.driverMarker
+                    }
+                  >
+
+                    <Ionicons
+                      name={
+                        getVehicleIcon(
+                          trip.vehicleType
+                        )
+                      }
+                      size={22}
+                      color={PURPLE}
+                    />
+
+                  </View>
+
+                </Marker>
+              )
+            }
+
+          </MapView>
+
+
+          <View
+            style={
+              styles.mapTopBar
+            }
+          >
+
+            <Pressable
+              onPress={
+                goBack
+              }
               style={
-                styles.backIcon
+                styles.mapBackButton
               }
             >
-              ‹
-            </Text>
+
+              <Ionicons
+                name="arrow-back"
+                size={22}
+                color={TEXT}
+              />
+
+            </Pressable>
+
+
+            <View
+              style={
+                styles.tripIdentity
+              }
+            >
+
+              <Text
+                style={
+                  styles.tripIdentityTitle
+                }
+              >
+                Trip details
+              </Text>
+
+              <Text
+                style={
+                  styles.tripIdentityId
+                }
+                numberOfLines={
+                  1
+                }
+              >
+                {
+                  trip.tripId ||
+                  trip._id ||
+                  'Trip'
+                }
+              </Text>
+
+            </View>
+
+
+            <Pressable
+              onPress={
+                refreshTrip
+              }
+              style={
+                styles.mapActionButton
+              }
+            >
+
+              <Ionicons
+                name="refresh"
+                size={20}
+                color={PURPLE}
+              />
+
+            </Pressable>
+
+          </View>
+
+
+          <Pressable
+            onPress={
+              recenterMap
+            }
+            style={
+              styles.recenterButton
+            }
+          >
+
+            <Ionicons
+              name="locate"
+              size={21}
+              color={PURPLE}
+            />
 
           </Pressable>
 
 
           <View
             style={
-              styles.headerTextWrap
+              styles.mapStatusCard
             }
           >
 
-            <Text
-              style={
-                styles.headerTitle
-              }
+            <View
+              style={[
+                styles.statusIcon,
+                {
+                  backgroundColor:
+                    statusColor,
+                },
+              ]}
             >
-              Trip Details
-            </Text>
 
-            <Text
-              style={
-                styles.headerSubtitle
-              }
-            >
-              {
-                trip.tripId ||
-                trip._id ||
-                'Trip'
-              }
-            </Text>
+              <Ionicons
+                name={
+                  getStatusIcon(
+                    status
+                  )
+                }
+                size={20}
+                color={WHITE}
+              />
 
-          </View>
+            </View>
 
-        </View>
-
-
-        {/* =================================================
-            STATUS CARD
-        ================================================= */}
-
-        <View
-          style={
-            styles.statusCard
-          }
-        >
-
-          <View
-            style={
-              styles.statusTop
-            }
-          >
-
-            <Text
-              style={
-                styles.statusLabel
-              }
-            >
-              CURRENT STATUS
-            </Text>
 
             <View
               style={
-                styles.statusBadge
+                styles.statusCopy
               }
             >
 
               <Text
                 style={
-                  styles.statusBadgeText
+                  styles.statusTitle
                 }
               >
                 {
@@ -753,87 +1796,80 @@ export default function TripDetails() {
                 }
               </Text>
 
+              <Text
+                style={
+                  styles.statusMessage
+                }
+                numberOfLines={
+                  2
+                }
+              >
+                {
+                  getStatusMessage(
+                    status
+                  )
+                }
+              </Text>
+
             </View>
 
           </View>
-
-
-          <Text
-            style={
-              styles.statusMessage
-            }
-          >
-            {
-              getStatusMessage(
-                status
-              )
-            }
-          </Text>
 
         </View>
 
 
         {/* =================================================
-            ROUTE
+            ROUTE SUMMARY
         ================================================= */}
 
         <View
           style={
-            styles.card
+            styles.routeCard
           }
         >
 
-          <Text
+          <View
             style={
-              styles.sectionTitle
+              styles.routeRail
             }
           >
-            ROUTE
-          </Text>
+
+            <View
+              style={
+                styles.routePickupDot
+              }
+            />
+
+            <View
+              style={
+                styles.routeLine
+              }
+            />
+
+            <View
+              style={
+                styles.routeDestinationDot
+              }
+            />
+
+          </View>
 
 
           <View
             style={
-              styles.routeRow
+              styles.routeLocations
             }
           >
 
             <View
               style={
-                styles.routeMarkerColumn
-              }
-            >
-
-              <View
-                style={
-                  styles.pickupDot
-                }
-              />
-
-              <View
-                style={
-                  styles.routeLine
-                }
-              />
-
-              <View
-                style={
-                  styles.destinationDot
-                }
-              />
-
-            </View>
-
-
-            <View
-              style={
-                styles.routeTextColumn
+                styles.routeLocationBlock
               }
             >
 
               <Text
                 style={
-                  styles.locationCaption
+                  styles.routeCaption
                 }
               >
                 PICKUP
@@ -841,7 +1877,10 @@ export default function TripDetails() {
 
               <Text
                 style={
-                  styles.locationText
+                  styles.routeLocationText
+                }
+                numberOfLines={
+                  2
                 }
               >
                 {
@@ -851,17 +1890,25 @@ export default function TripDetails() {
                 }
               </Text>
 
+            </View>
 
-              <View
-                style={
-                  styles.routeSpacer
-                }
-              />
 
+            <View
+              style={
+                styles.routeDivider
+              }
+            />
+
+
+            <View
+              style={
+                styles.routeLocationBlock
+              }
+            >
 
               <Text
                 style={
-                  styles.locationCaption
+                  styles.routeCaption
                 }
               >
                 DESTINATION
@@ -869,7 +1916,10 @@ export default function TripDetails() {
 
               <Text
                 style={
-                  styles.locationText
+                  styles.routeLocationText
+                }
+                numberOfLines={
+                  2
                 }
               >
                 {
@@ -887,41 +1937,30 @@ export default function TripDetails() {
 
 
         {/* =================================================
-            FARE
+            QUICK SUMMARY
         ================================================= */}
 
         <View
           style={
-            styles.card
+            styles.summaryRow
           }
         >
 
-          <Text
-            style={
-              styles.sectionTitle
-            }
-          >
-            FARE
-          </Text>
-
-
           <View
             style={
-              styles.fareRow
+              styles.summaryBox
             }
           >
 
-            <Text
-              style={
-                styles.fareLabel
-              }
-            >
-              Total fare
-            </Text>
+            <Ionicons
+              name="cash-outline"
+              size={20}
+              color={PURPLE}
+            />
 
             <Text
               style={
-                styles.fareValue
+                styles.summaryValue
               }
             >
               {
@@ -931,262 +1970,99 @@ export default function TripDetails() {
               }
             </Text>
 
+            <Text
+              style={
+                styles.summaryLabel
+              }
+            >
+              Fare
+            </Text>
+
           </View>
-
-
-          {
-            trip.distanceKm != null &&
-            (
-              <View
-                style={
-                  styles.infoRow
-                }
-              >
-
-                <Text
-                  style={
-                    styles.infoLabel
-                  }
-                >
-                  Distance
-                </Text>
-
-                <Text
-                  style={
-                    styles.infoValue
-                  }
-                >
-                  {
-                    trip.distanceKm
-                  }
-                  km
-                </Text>
-
-              </View>
-            )
-          }
-
-
-          {
-            trip.estimatedMinutes != null &&
-            (
-              <View
-                style={
-                  styles.infoRow
-                }
-              >
-
-                <Text
-                  style={
-                    styles.infoLabel
-                  }
-                >
-                  Estimated time
-                </Text>
-
-                <Text
-                  style={
-                    styles.infoValue
-                  }
-                >
-                  {
-                    trip.estimatedMinutes
-                  }
-                  min
-                </Text>
-
-              </View>
-            )
-          }
-
-
-          {
-            trip.farePerPassenger != null &&
-            (
-              <View
-                style={
-                  styles.infoRow
-                }
-              >
-
-                <Text
-                  style={
-                    styles.infoLabel
-                  }
-                >
-                  Fare per passenger
-                </Text>
-
-                <Text
-                  style={
-                    styles.infoValue
-                  }
-                >
-                  {
-                    formatMoney(
-                      trip.farePerPassenger
-                    )
-                  }
-                </Text>
-
-              </View>
-            )
-          }
-
-        </View>
-
-
-        {/* =================================================
-            RIDE INFORMATION
-        ================================================= */}
-
-        <View
-          style={
-            styles.card
-          }
-        >
-
-          <Text
-            style={
-              styles.sectionTitle
-            }
-          >
-            RIDE INFORMATION
-          </Text>
 
 
           <View
             style={
-              styles.infoRow
+              styles.summaryBox
             }
           >
 
+            <Ionicons
+              name="navigate-outline"
+              size={20}
+              color={PURPLE}
+            />
+
             <Text
               style={
-                styles.infoLabel
+                styles.summaryValue
               }
             >
-              Vehicle
+              {
+                trip.distanceKm !=
+                null
+                  ? `${Number(
+                      trip.distanceKm
+                    ).toFixed(1)} km`
+                  : '--'
+              }
             </Text>
 
             <Text
               style={
-                styles.infoValue
+                styles.summaryLabel
               }
             >
-              {
-                trip.vehicleType ||
-                'Not specified'
-              }
+              Distance
             </Text>
 
           </View>
 
 
-          {
-            trip.kekeRideType &&
-            (
-              <View
-                style={
-                  styles.infoRow
-                }
-              >
+          <View
+            style={
+              styles.summaryBox
+            }
+          >
 
-                <Text
-                  style={
-                    styles.infoLabel
-                  }
-                >
-                  Ride type
-                </Text>
+            <Ionicons
+              name="time-outline"
+              size={20}
+              color={PURPLE}
+            />
 
-                <Text
-                  style={
-                    styles.infoValue
-                  }
-                >
-                  {
-                    formatPaymentMethod(
-                      trip.kekeRideType
-                    )
-                  }
-                </Text>
+            <Text
+              style={
+                styles.summaryValue
+              }
+            >
+              {
+                trip.estimatedMinutes !=
+                null
+                  ? `${Math.round(
+                      Number(
+                        trip.estimatedMinutes
+                      )
+                    )} min`
+                  : '--'
+              }
+            </Text>
 
-              </View>
-            )
-          }
+            <Text
+              style={
+                styles.summaryLabel
+              }
+            >
+              Estimate
+            </Text>
 
-
-          {
-            trip.seatsRequested != null &&
-            (
-              <View
-                style={
-                  styles.infoRow
-                }
-              >
-
-                <Text
-                  style={
-                    styles.infoLabel
-                  }
-                >
-                  Seats
-                </Text>
-
-                <Text
-                  style={
-                    styles.infoValue
-                  }
-                >
-                  {
-                    trip.seatsRequested
-                  }
-                </Text>
-
-              </View>
-            )
-          }
-
-
-          {
-            trip.paymentMethod &&
-            (
-              <View
-                style={
-                  styles.infoRow
-                }
-              >
-
-                <Text
-                  style={
-                    styles.infoLabel
-                  }
-                >
-                  Payment
-                </Text>
-
-                <Text
-                  style={
-                    styles.infoValue
-                  }
-                >
-                  {
-                    formatPaymentMethod(
-                      trip.paymentMethod
-                    )
-                  }
-                </Text>
-
-              </View>
-            )
-          }
+          </View>
 
         </View>
 
 
         {/* =================================================
-            DRIVER
+            DRIVER / VEHICLE
         ================================================= */}
 
         <View
@@ -1195,80 +2071,183 @@ export default function TripDetails() {
           }
         >
 
-          <Text
+          <View
             style={
-              styles.sectionTitle
+              styles.cardHeading
             }
           >
-            DRIVER
-          </Text>
+
+            <Text
+              style={
+                styles.cardTitle
+              }
+            >
+              Driver & vehicle
+            </Text>
+
+            {
+              driverCoordinate &&
+              (
+                <View
+                  style={
+                    styles.liveBadge
+                  }
+                >
+
+                  <View
+                    style={
+                      styles.liveDot
+                    }
+                  />
+
+                  <Text
+                    style={
+                      styles.liveText
+                    }
+                  >
+                    LOCATION
+                  </Text>
+
+                </View>
+              )
+            }
+
+          </View>
 
 
           {
             hasDriver
               ? (
 
-                <View
-                  style={
-                    styles.driverRow
-                  }
-                >
-
+                <>
                   <View
                     style={
-                      styles.driverAvatar
+                      styles.driverRow
                     }
                   >
 
-                    <Text
+                    <View
                       style={
-                        styles.driverAvatarText
+                        styles.driverAvatar
                       }
                     >
-                      {
-                        (
+
+                      <Text
+                        style={
+                          styles.driverAvatarText
+                        }
+                      >
+                        {
+                          (
+                            trip.driver?.fullName ||
+                            'D'
+                          )
+                            .charAt(
+                              0
+                            )
+                            .toUpperCase()
+                        }
+                      </Text>
+
+                    </View>
+
+
+                    <View
+                      style={
+                        styles.driverInfo
+                      }
+                    >
+
+                      <Text
+                        style={
+                          styles.driverName
+                        }
+                      >
+                        {
                           trip.driver?.fullName ||
-                          'D'
-                        )
-                          .charAt(0)
-                          .toUpperCase()
+                          'Driver'
+                        }
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.driverPhone
+                        }
+                      >
+                        {
+                          trip.driver?.phone ||
+                          'Phone unavailable'
+                        }
+                      </Text>
+
+                    </View>
+
+
+                    <View
+                      style={
+                        styles.vehicleIcon
                       }
-                    </Text>
+                    >
+
+                      <Ionicons
+                        name={
+                          getVehicleIcon(
+                            trip.vehicleType
+                          )
+                        }
+                        size={25}
+                        color={PURPLE}
+                      />
+
+                    </View>
 
                   </View>
 
 
                   <View
                     style={
-                      styles.driverInfo
+                      styles.vehicleDetails
                     }
                   >
 
-                    <Text
-                      style={
-                        styles.driverName
+                    <DetailRow
+                      icon={
+                        getVehicleIcon(
+                          trip.vehicleType
+                        )
                       }
-                    >
-                      {
-                        trip.driver?.fullName ||
-                        'Driver'
+                      label="Vehicle"
+                      value={
+                        [
+                          trip.vehicleColor,
+                          trip.vehicleModel,
+                        ]
+                          .filter(
+                            Boolean
+                          )
+                          .join(
+                            ' '
+                          ) ||
+                        formatValue(
+                          trip.vehicleType
+                        )
                       }
-                    </Text>
+                    />
 
-                    <Text
-                      style={
-                        styles.driverPhone
+
+                    <DetailRow
+                      icon="card-outline"
+                      label="Plate number"
+                      value={
+                        trip.plateNumber ||
+                        'Not available'
                       }
-                    >
-                      {
-                        trip.driver?.phone ||
-                        'Phone unavailable'
-                      }
-                    </Text>
+                      last
+                    />
 
                   </View>
 
-                </View>
+                </>
 
               )
               : (
@@ -1279,58 +2258,322 @@ export default function TripDetails() {
                   }
                 >
 
-                  <Text
+                  <View
                     style={
-                      styles.noDriverTitle
+                      styles.searchingIcon
                     }
                   >
-                    {
-                      isSearching
-                        ? 'Finding your driver'
-                        : 'Driver not assigned yet'
-                    }
-                  </Text>
 
-                  <Text
+                    {
+                      status ===
+                      'SEARCHING_DRIVER'
+                        ? (
+                          <ActivityIndicator
+                            color={
+                              PURPLE
+                            }
+                          />
+                        )
+                        : (
+                          <Ionicons
+                            name="person-outline"
+                            size={23}
+                            color={PURPLE}
+                          />
+                        )
+                    }
+
+                  </View>
+
+
+                  <View
                     style={
-                      styles.noDriverText
+                      styles.noDriverCopy
                     }
                   >
-                    {
-                      isSearching
-                        ? 'Nearby approved drivers will receive your ride request.'
-                        : 'Driver information will appear here once assigned.'
-                    }
-                  </Text>
+
+                    <Text
+                      style={
+                        styles.noDriverTitle
+                      }
+                    >
+                      {
+                        status ===
+                        'SEARCHING_DRIVER'
+                          ? 'Finding your driver'
+                          : 'Driver not assigned'
+                      }
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.noDriverText
+                      }
+                    >
+                      {
+                        status ===
+                        'SEARCHING_DRIVER'
+                          ? 'Nearby approved drivers are receiving your ride request.'
+                          : 'Driver information will appear here when a driver is assigned.'
+                      }
+                    </Text>
+
+                  </View>
 
                 </View>
 
               )
           }
 
+        </View>
 
-          {
-            driverLocation &&
-            (
+
+        {/* =================================================
+            RIDE & PAYMENT
+        ================================================= */}
+
+        <View
+          style={
+            styles.card
+          }
+        >
+
+          <Text
+            style={
+              styles.cardTitle
+            }
+          >
+            Ride & payment
+          </Text>
+
+
+          <View
+            style={
+              styles.detailsList
+            }
+          >
+
+            <DetailRow
+              icon={
+                getVehicleIcon(
+                  trip.vehicleType
+                )
+              }
+              label="Ride"
+              value={
+                formatValue(
+                  trip.vehicleType
+                )
+              }
+            />
+
+
+            {
+              trip.kekeRideType &&
+              (
+                <DetailRow
+                  icon="people-outline"
+                  label="Keke option"
+                  value={
+                    formatValue(
+                      trip.kekeRideType
+                    )
+                  }
+                />
+              )
+            }
+
+
+            {
+              trip.seatsRequested !=
+              null &&
+              (
+                <DetailRow
+                  icon="person-outline"
+                  label="Seats requested"
+                  value={
+                    String(
+                      trip.seatsRequested
+                    )
+                  }
+                />
+              )
+            }
+
+
+            <DetailRow
+              icon={
+                trip.paymentMethod ===
+                'wallet'
+                  ? 'wallet-outline'
+                  : 'cash-outline'
+              }
+              label="Payment method"
+              value={
+                formatValue(
+                  trip.paymentMethod
+                )
+              }
+            />
+
+
+            {
+              trip.paymentStatus &&
+              (
+                <DetailRow
+                  icon="checkmark-circle-outline"
+                  label="Payment status"
+                  value={
+                    formatValue(
+                      trip.paymentStatus
+                    )
+                  }
+                />
+              )
+            }
+
+
+            {
+              trip.farePerPassenger !=
+              null &&
+              (
+                <DetailRow
+                  icon="person-outline"
+                  label="Fare per passenger"
+                  value={
+                    formatMoney(
+                      trip.farePerPassenger
+                    )
+                  }
+                />
+              )
+            }
+
+
+            <DetailRow
+              icon="receipt-outline"
+              label="Total fare"
+              value={
+                formatMoney(
+                  trip.fare
+                )
+              }
+              last
+            />
+
+          </View>
+
+        </View>
+
+
+        {/* =================================================
+            RIDER CANCELLATION
+        ================================================= */}
+
+        {
+          canCancel &&
+          (
+            <View
+              style={
+                styles.cancelCard
+              }
+            >
+
               <View
                 style={
-                  styles.locationStatus
+                  styles.cancelInfo
                 }
               >
 
-                <Text
+                <View
                   style={
-                    styles.locationStatusText
+                    styles.cancelIcon
                   }
                 >
-                  Driver location available
-                </Text>
+
+                  <Ionicons
+                    name="close-circle-outline"
+                    size={22}
+                    color={RED}
+                  />
+
+                </View>
+
+
+                <View
+                  style={
+                    styles.cancelCopy
+                  }
+                >
+
+                  <Text
+                    style={
+                      styles.cancelTitle
+                    }
+                  >
+                    Need to cancel?
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.cancelText
+                    }
+                  >
+                    You can cancel before the ride begins.
+                  </Text>
+
+                </View>
 
               </View>
-            )
-          }
 
-        </View>
+
+              <Pressable
+                onPress={
+                  confirmCancelTrip
+                }
+                disabled={
+                  cancelling
+                }
+                style={[
+                  styles.cancelButton,
+                  cancelling &&
+                  styles.cancelButtonDisabled,
+                ]}
+              >
+
+                {
+                  cancelling
+                    ? (
+                      <ActivityIndicator
+                        size="small"
+                        color={RED}
+                      />
+                    )
+                    : (
+                      <>
+                        <Ionicons
+                          name="close-circle-outline"
+                          size={18}
+                          color={RED}
+                        />
+
+                        <Text
+                          style={
+                            styles.cancelButtonText
+                          }
+                        >
+                          Cancel ride
+                        </Text>
+                      </>
+                    )
+                }
+
+              </Pressable>
+
+            </View>
+          )
+        }
+
 
 
         {/* =================================================
@@ -1345,113 +2588,86 @@ export default function TripDetails() {
 
           <Text
             style={
-              styles.sectionTitle
+              styles.cardTitle
             }
           >
-            TRIP RECORD
+            Trip record
           </Text>
 
 
-          {
-            trip.routingSource &&
-            (
-              <View
-                style={
-                  styles.infoRow
-                }
-              >
+          <View
+            style={
+              styles.detailsList
+            }
+          >
 
-                <Text
-                  style={
-                    styles.infoLabel
-                  }
-                >
-                  Routing
-                </Text>
-
-                <Text
-                  style={
-                    styles.infoValue
-                  }
-                >
-                  {
-                    trip.routingSource
-                  }
-                </Text>
-
-              </View>
-            )
-          }
-
-
-          {
-            trip.pricingBasis &&
-            (
-              <View
-                style={
-                  styles.infoRow
-                }
-              >
-
-                <Text
-                  style={
-                    styles.infoLabel
-                  }
-                >
-                  Pricing basis
-                </Text>
-
-                <Text
-                  style={
-                    styles.infoValue
-                  }
-                >
-                  {
-                    formatPaymentMethod(
-                      trip.pricingBasis
-                    )
-                  }
-                </Text>
-
-              </View>
-            )
-          }
-
-
-          {
-            trip.createdAt &&
-            (
-              <View
-                style={
-                  styles.infoRow
-                }
-              >
-
-                <Text
-                  style={
-                    styles.infoLabel
-                  }
-                >
-                  Created
-                </Text>
-
-                <Text
-                  style={
-                    styles.infoValue
-                  }
-                >
-                  {
+            {
+              trip.createdAt &&
+              (
+                <DetailRow
+                  icon="calendar-outline"
+                  label="Requested"
+                  value={
                     new Date(
                       trip.createdAt
                     ).toLocaleString(
                       'en-NG'
                     )
                   }
-                </Text>
+                />
+              )
+            }
 
-              </View>
-            )
-          }
+
+            {
+              trip.routingSource &&
+              (
+                <DetailRow
+                  icon="map-outline"
+                  label="Routing"
+                  value={
+                    formatValue(
+                      trip.routingSource
+                    )
+                  }
+                />
+              )
+            }
+
+
+            {
+              trip.pricingBasis &&
+              (
+                <DetailRow
+                  icon="pricetag-outline"
+                  label="Pricing basis"
+                  value={
+                    formatValue(
+                      trip.pricingBasis
+                    )
+                  }
+                />
+              )
+            }
+
+
+            {
+              trip.pricingVersion &&
+              (
+                <DetailRow
+                  icon="information-circle-outline"
+                  label="Pricing version"
+                  value={
+                    String(
+                      trip.pricingVersion
+                    )
+                  }
+                  last
+                />
+              )
+            }
+
+          </View>
 
         </View>
 
@@ -1469,13 +2685,33 @@ export default function TripDetails() {
           }
         >
 
-          <Text
-            style={
-              styles.refreshButtonText
-            }
-          >
-            Refresh Trip
-          </Text>
+          {
+            refreshing
+              ? (
+                <ActivityIndicator
+                  color={
+                    WHITE
+                  }
+                />
+              )
+              : (
+                <>
+                  <Ionicons
+                    name="refresh"
+                    size={18}
+                    color={WHITE}
+                  />
+
+                  <Text
+                    style={
+                      styles.refreshButtonText
+                    }
+                  >
+                    Refresh trip
+                  </Text>
+                </>
+              )
+          }
 
         </Pressable>
 
@@ -1509,7 +2745,7 @@ const styles =
     safe: {
       flex: 1,
       backgroundColor:
-        BrandColors.background,
+        BACKGROUND,
     },
 
 
@@ -1519,260 +2755,453 @@ const styles =
 
 
     content: {
-      paddingHorizontal: 18,
       paddingBottom: 30,
     },
 
 
-    header: {
-      minHeight: 70,
+    /*
+    -------------------------------------------------------
+    MAP
+    -------------------------------------------------------
+    */
+
+    mapHero: {
+      height: 390,
+      backgroundColor:
+        '#E7E7EB',
+      marginBottom: 14,
+      overflow: 'hidden',
+    },
+
+
+    mapTopBar: {
+      position: 'absolute',
+      top:
+        Platform.OS ===
+        'android'
+          ? 14
+          : 10,
+      left: 14,
+      right: 14,
       flexDirection: 'row',
       alignItems: 'center',
     },
 
 
-    backButton: {
-      width: 42,
-      height: 42,
-      borderRadius: 13,
+    mapBackButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       backgroundColor:
-        BrandColors.primaryLight,
+        WHITE,
+      alignItems: 'center',
+      justifyContent: 'center',
+      elevation: 5,
+      shadowColor:
+        '#000000',
+      shadowOpacity: 0.12,
+      shadowRadius: 8,
+      shadowOffset: {
+        width: 0,
+        height: 3,
+      },
+    },
+
+
+    tripIdentity: {
+      flex: 1,
+      minHeight: 48,
+      marginHorizontal: 9,
+      paddingHorizontal: 14,
+      justifyContent: 'center',
+      borderRadius: 16,
+      backgroundColor:
+        WHITE,
+      elevation: 5,
+      shadowColor:
+        '#000000',
+      shadowOpacity: 0.12,
+      shadowRadius: 8,
+      shadowOffset: {
+        width: 0,
+        height: 3,
+      },
+    },
+
+
+    tripIdentityTitle: {
+      color:
+        TEXT,
+      fontSize: 13,
+      fontWeight: '900',
+    },
+
+
+    tripIdentityId: {
+      color:
+        MUTED,
+      fontSize: 9,
+      marginTop: 2,
+    },
+
+
+    mapActionButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor:
+        WHITE,
+      alignItems: 'center',
+      justifyContent: 'center',
+      elevation: 5,
+      shadowColor:
+        '#000000',
+      shadowOpacity: 0.12,
+      shadowRadius: 8,
+      shadowOffset: {
+        width: 0,
+        height: 3,
+      },
+    },
+
+
+    recenterButton: {
+      position: 'absolute',
+      right: 15,
+      bottom: 91,
+      width: 45,
+      height: 45,
+      borderRadius: 23,
+      backgroundColor:
+        WHITE,
+      alignItems: 'center',
+      justifyContent: 'center',
+      elevation: 5,
+      shadowColor:
+        '#000000',
+      shadowOpacity: 0.14,
+      shadowRadius: 7,
+      shadowOffset: {
+        width: 0,
+        height: 3,
+      },
+    },
+
+
+    mapStatusCard: {
+      position: 'absolute',
+      left: 14,
+      right: 14,
+      bottom: 14,
+      minHeight: 67,
+      padding: 11,
+      borderRadius: 18,
+      backgroundColor:
+        WHITE,
+      flexDirection: 'row',
+      alignItems: 'center',
+      elevation: 7,
+      shadowColor:
+        '#000000',
+      shadowOpacity: 0.14,
+      shadowRadius: 10,
+      shadowOffset: {
+        width: 0,
+        height: 4,
+      },
+    },
+
+
+    statusIcon: {
+      width: 43,
+      height: 43,
+      borderRadius: 14,
       alignItems: 'center',
       justifyContent: 'center',
     },
 
 
-    backIcon: {
-      fontSize: 30,
-      lineHeight: 31,
-      color:
-        BrandColors.primary,
-      fontWeight: '400',
-      marginTop: -3,
-    },
-
-
-    headerTextWrap: {
-      marginLeft: 12,
+    statusCopy: {
       flex: 1,
+      marginLeft: 11,
     },
 
 
-    headerTitle: {
+    statusTitle: {
       color:
-        BrandColors.text,
-      fontSize: 20,
-      fontWeight: '900',
-    },
-
-
-    headerSubtitle: {
-      color:
-        BrandColors.textSecondary,
-      fontSize: 10,
-      marginTop: 3,
-    },
-
-
-    statusCard: {
-      backgroundColor:
-        BrandColors.primaryLight,
-      borderRadius: 17,
-      padding: 17,
-      marginBottom: 14,
-      borderWidth: 1,
-      borderColor:
-        '#DDEBE5',
-    },
-
-
-    statusTop: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-    },
-
-
-    statusLabel: {
-      color:
-        BrandColors.textSecondary,
-      fontSize: 9,
-      fontWeight: '900',
-      letterSpacing: 0.6,
-    },
-
-
-    statusBadge: {
-      backgroundColor:
-        BrandColors.primary,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: 10,
-    },
-
-
-    statusBadgeText: {
-      color: '#FFFFFF',
-      fontSize: 9,
+        TEXT,
+      fontSize: 14,
       fontWeight: '900',
     },
 
 
     statusMessage: {
       color:
-        BrandColors.text,
-      fontSize: 13,
-      fontWeight: '700',
-      marginTop: 12,
-      lineHeight: 19,
+        MUTED,
+      fontSize: 10,
+      lineHeight: 15,
+      marginTop: 3,
     },
 
 
-    card: {
-      backgroundColor: '#FFFFFF',
-      borderRadius: 17,
-      padding: 17,
-      marginBottom: 14,
+    pickupMarker: {
+      width: 29,
+      height: 29,
+      borderRadius: 15,
+      backgroundColor:
+        WHITE,
+      borderWidth: 3,
+      borderColor:
+        PURPLE,
+      alignItems: 'center',
+      justifyContent: 'center',
+      elevation: 4,
+    },
+
+
+    pickupMarkerInner: {
+      width: 9,
+      height: 9,
+      borderRadius: 5,
+      backgroundColor:
+        PURPLE,
+    },
+
+
+    destinationMarker: {
+      width: 31,
+      height: 31,
+      borderRadius: 16,
+      backgroundColor:
+        RED,
+      borderWidth: 3,
+      borderColor:
+        WHITE,
+      alignItems: 'center',
+      justifyContent: 'center',
+      elevation: 4,
+    },
+
+
+    driverMarker: {
+      width: 45,
+      height: 45,
+      borderRadius: 23,
+      backgroundColor:
+        WHITE,
+      borderWidth: 3,
+      borderColor:
+        PURPLE,
+      alignItems: 'center',
+      justifyContent: 'center',
+      elevation: 6,
+    },
+
+
+    /*
+    -------------------------------------------------------
+    ROUTE
+    -------------------------------------------------------
+    */
+
+    routeCard: {
+      marginHorizontal: 16,
+      marginBottom: 12,
+      padding: 15,
+      borderRadius: 19,
+      backgroundColor:
+        WHITE,
       borderWidth: 1,
-      borderColor: '#EAEAEA',
-    },
-
-
-    sectionTitle: {
-      color:
-        BrandColors.textSecondary,
-      fontSize: 9,
-      fontWeight: '900',
-      letterSpacing: 0.7,
-      marginBottom: 15,
-    },
-
-
-    routeRow: {
+      borderColor:
+        BORDER,
       flexDirection: 'row',
     },
 
 
-    routeMarkerColumn: {
+    routeRail: {
       width: 24,
       alignItems: 'center',
+      paddingVertical: 10,
     },
 
 
-    pickupDot: {
+    routePickupDot: {
       width: 11,
       height: 11,
       borderRadius: 6,
       borderWidth: 3,
       borderColor:
-        BrandColors.primary,
+        PURPLE,
       backgroundColor:
-        '#FFFFFF',
-    },
-
-
-    destinationDot: {
-      width: 11,
-      height: 11,
-      borderRadius: 6,
-      backgroundColor:
-        BrandColors.primary,
+        WHITE,
     },
 
 
     routeLine: {
       width: 2,
-      height: 47,
-      backgroundColor:
-        '#C9D8D1',
+      flex: 1,
+      minHeight: 44,
       marginVertical: 4,
+      backgroundColor:
+        '#CEC9DA',
     },
 
 
-    routeTextColumn: {
+    routeDestinationDot: {
+      width: 11,
+      height: 11,
+      borderRadius: 2,
+      backgroundColor:
+        RED,
+    },
+
+
+    routeLocations: {
       flex: 1,
       paddingLeft: 9,
     },
 
 
-    locationCaption: {
+    routeLocationBlock: {
+      minHeight: 52,
+      justifyContent: 'center',
+    },
+
+
+    routeCaption: {
       color:
-        BrandColors.textSecondary,
+        MUTED,
       fontSize: 8,
       fontWeight: '900',
-      letterSpacing: 0.5,
+      letterSpacing: 0.6,
     },
 
 
-    locationText: {
+    routeLocationText: {
       color:
-        BrandColors.text,
+        TEXT,
       fontSize: 13,
       fontWeight: '800',
+      lineHeight: 18,
       marginTop: 4,
-      lineHeight: 19,
     },
 
 
-    routeSpacer: {
-      height: 26,
+    routeDivider: {
+      height: 1,
+      backgroundColor:
+        '#EFEFF2',
     },
 
 
-    fareRow: {
+    /*
+    -------------------------------------------------------
+    SUMMARY
+    -------------------------------------------------------
+    */
+
+    summaryRow: {
+      marginHorizontal: 16,
+      marginBottom: 12,
       flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingBottom: 13,
-      borderBottomWidth: 1,
-      borderBottomColor:
-        '#EEEEEE',
+      gap: 8,
     },
 
 
-    fareLabel: {
-      color:
-        BrandColors.textSecondary,
-      fontSize: 12,
-      fontWeight: '700',
-    },
-
-
-    fareValue: {
-      color:
-        BrandColors.primary,
-      fontSize: 21,
-      fontWeight: '900',
-    },
-
-
-    infoRow: {
-      minHeight: 37,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      borderBottomWidth: 1,
-      borderBottomColor:
-        '#F1F1F1',
-    },
-
-
-    infoLabel: {
-      color:
-        BrandColors.textSecondary,
-      fontSize: 11,
-      fontWeight: '600',
+    summaryBox: {
       flex: 1,
+      minHeight: 91,
+      padding: 11,
+      borderRadius: 17,
+      backgroundColor:
+        WHITE,
+      borderWidth: 1,
+      borderColor:
+        BORDER,
+      justifyContent: 'center',
     },
 
 
-    infoValue: {
+    summaryValue: {
       color:
-        BrandColors.text,
-      fontSize: 11,
-      fontWeight: '800',
-      textAlign: 'right',
-      maxWidth: '62%',
+        TEXT,
+      fontSize: 13,
+      fontWeight: '900',
+      marginTop: 7,
+    },
+
+
+    summaryLabel: {
+      color:
+        MUTED,
+      fontSize: 9,
+      marginTop: 2,
+    },
+
+
+    /*
+    -------------------------------------------------------
+    CARDS
+    -------------------------------------------------------
+    */
+
+    card: {
+      marginHorizontal: 16,
+      marginBottom: 12,
+      padding: 16,
+      borderRadius: 19,
+      backgroundColor:
+        WHITE,
+      borderWidth: 1,
+      borderColor:
+        BORDER,
+    },
+
+
+    cardHeading: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 14,
+    },
+
+
+    cardTitle: {
+      color:
+        TEXT,
+      fontSize: 15,
+      fontWeight: '900',
+      marginBottom: 13,
+    },
+
+
+    liveBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 8,
+      paddingVertical: 5,
+      borderRadius: 9,
+      backgroundColor:
+        '#EAF8F1',
+    },
+
+
+    liveDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor:
+        GREEN,
+      marginRight: 5,
+    },
+
+
+    liveText: {
+      color:
+        GREEN,
+      fontSize: 8,
+      fontWeight: '900',
+      letterSpacing: 0.4,
     },
 
 
@@ -1783,11 +3212,11 @@ const styles =
 
 
     driverAvatar: {
-      width: 48,
-      height: 48,
-      borderRadius: 15,
+      width: 52,
+      height: 52,
+      borderRadius: 17,
       backgroundColor:
-        BrandColors.primaryLight,
+        SOFT_PURPLE,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -1795,42 +3224,79 @@ const styles =
 
     driverAvatarText: {
       color:
-        BrandColors.primary,
-      fontSize: 19,
+        PURPLE,
+      fontSize: 20,
       fontWeight: '900',
     },
 
 
     driverInfo: {
-      marginLeft: 12,
       flex: 1,
+      marginLeft: 12,
     },
 
 
     driverName: {
       color:
-        BrandColors.text,
-      fontSize: 14,
+        TEXT,
+      fontSize: 15,
       fontWeight: '900',
     },
 
 
     driverPhone: {
       color:
-        BrandColors.textSecondary,
+        MUTED,
       fontSize: 11,
       marginTop: 4,
     },
 
 
+    vehicleIcon: {
+      width: 45,
+      height: 45,
+      borderRadius: 14,
+      backgroundColor:
+        SOFT_PURPLE,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+
+    vehicleDetails: {
+      marginTop: 14,
+      borderTopWidth: 1,
+      borderTopColor:
+        '#EFEFF2',
+    },
+
+
     noDriver: {
-      paddingVertical: 4,
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+
+
+    searchingIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: 16,
+      backgroundColor:
+        SOFT_PURPLE,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+
+    noDriverCopy: {
+      flex: 1,
+      marginLeft: 12,
     },
 
 
     noDriverTitle: {
       color:
-        BrandColors.text,
+        TEXT,
       fontSize: 13,
       fontWeight: '900',
     },
@@ -1838,43 +3304,170 @@ const styles =
 
     noDriverText: {
       color:
-        BrandColors.textSecondary,
-      fontSize: 11,
-      lineHeight: 17,
-      marginTop: 5,
-    },
-
-
-    locationStatus: {
-      marginTop: 13,
-      paddingTop: 11,
-      borderTopWidth: 1,
-      borderTopColor:
-        '#EEEEEE',
-    },
-
-
-    locationStatusText: {
-      color:
-        BrandColors.primary,
+        MUTED,
       fontSize: 10,
+      lineHeight: 15,
+      marginTop: 4,
+    },
+
+
+    detailsList: {
+      marginTop: -3,
+    },
+
+
+    detailRow: {
+      minHeight: 58,
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderBottomWidth: 1,
+      borderBottomColor:
+        '#EFEFF2',
+    },
+
+
+    detailRowLast: {
+      borderBottomWidth: 0,
+    },
+
+
+    detailIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 11,
+      backgroundColor:
+        SOFT_PURPLE,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+
+    detailCopy: {
+      flex: 1,
+      marginLeft: 11,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+
+
+    detailLabel: {
+      color:
+        MUTED,
+      fontSize: 10,
+      fontWeight: '600',
+      flex: 1,
+      paddingRight: 10,
+    },
+
+
+    detailValue: {
+      color:
+        TEXT,
+      fontSize: 11,
       fontWeight: '800',
+      textAlign: 'right',
+      maxWidth: '58%',
+    },
+
+
+    /*
+    -------------------------------------------------------
+    BUTTON / FOOTER
+    -------------------------------------------------------
+    */
+
+    cancelCard: {
+      marginHorizontal: 16,
+      marginBottom: 12,
+      padding: 15,
+      borderRadius: 19,
+      backgroundColor: '#FFF7F7',
+      borderWidth: 1,
+      borderColor: '#F2CECE',
+    },
+
+
+    cancelInfo: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+
+
+    cancelIcon: {
+      width: 42,
+      height: 42,
+      borderRadius: 14,
+      backgroundColor: '#FFEAEA',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+
+    cancelCopy: {
+      flex: 1,
+      marginLeft: 11,
+    },
+
+
+    cancelTitle: {
+      color: TEXT,
+      fontSize: 13,
+      fontWeight: '900',
+    },
+
+
+    cancelText: {
+      color: MUTED,
+      fontSize: 10,
+      lineHeight: 15,
+      marginTop: 3,
+    },
+
+
+    cancelButton: {
+      minHeight: 48,
+      marginTop: 13,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: '#E8AFAF',
+      backgroundColor: WHITE,
+      flexDirection: 'row',
+      gap: 7,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+
+    cancelButtonDisabled: {
+      opacity: 0.55,
+    },
+
+
+    cancelButtonText: {
+      color: RED,
+      fontSize: 12,
+      fontWeight: '900',
     },
 
 
     refreshButton: {
-      minHeight: 47,
-      borderRadius: 14,
+      minHeight: 52,
+      marginHorizontal: 16,
+      marginTop: 2,
+      borderRadius: 15,
       backgroundColor:
-        BrandColors.primary,
+        PURPLE,
+      flexDirection: 'row',
+      gap: 8,
       alignItems: 'center',
       justifyContent: 'center',
-      marginTop: 2,
     },
 
 
     refreshButtonText: {
-      color: '#FFFFFF',
+      color:
+        WHITE,
       fontSize: 12,
       fontWeight: '900',
     },
@@ -1889,27 +3482,57 @@ const styles =
     },
 
 
+    /*
+    -------------------------------------------------------
+    LOADING / ERROR
+    -------------------------------------------------------
+    */
+
     loading: {
       flex: 1,
       backgroundColor:
-        BrandColors.background,
+        BACKGROUND,
       alignItems: 'center',
       justifyContent: 'center',
       paddingHorizontal: 30,
     },
 
 
+    loadingLogo: {
+      width: 58,
+      height: 58,
+      borderRadius: 20,
+      backgroundColor:
+        PURPLE,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 18,
+    },
+
+
     loadingText: {
       color:
-        BrandColors.textSecondary,
+        MUTED,
       fontSize: 11,
-      marginTop: 10,
+      marginTop: 11,
+    },
+
+
+    errorIcon: {
+      width: 58,
+      height: 58,
+      borderRadius: 20,
+      backgroundColor:
+        '#FFF0F0',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 13,
     },
 
 
     errorTitle: {
       color:
-        BrandColors.text,
+        TEXT,
       fontSize: 18,
       fontWeight: '900',
       textAlign: 'center',
@@ -1918,7 +3541,7 @@ const styles =
 
     errorText: {
       color:
-        BrandColors.textSecondary,
+        MUTED,
       fontSize: 12,
       lineHeight: 18,
       textAlign: 'center',
@@ -1932,7 +3555,7 @@ const styles =
       minHeight: 44,
       borderRadius: 13,
       backgroundColor:
-        BrandColors.primary,
+        PURPLE,
       alignItems: 'center',
       justifyContent: 'center',
       paddingHorizontal: 20,
@@ -1940,7 +3563,8 @@ const styles =
 
 
     retryText: {
-      color: '#FFFFFF',
+      color:
+        WHITE,
       fontSize: 12,
       fontWeight: '900',
     },
@@ -1957,9 +3581,10 @@ const styles =
 
     backSecondaryText: {
       color:
-        BrandColors.primary,
+        PURPLE,
       fontSize: 11,
       fontWeight: '900',
     },
 
   });
+

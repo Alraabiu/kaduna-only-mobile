@@ -236,6 +236,7 @@ export default function RiderTrip() {
   const [refreshing, setRefreshing] = useState(false);
   const [confirmingArrival, setConfirmingArrival] = useState(false);
   const [completingTrip, setCompletingTrip] = useState(false);
+  const [cancellingTrip, setCancellingTrip] = useState(false);
 
   /*
   =======================================================
@@ -690,6 +691,113 @@ useEffect(() => {
 
   /*
   =======================================================
+  RIDER CANCEL RIDE
+  =======================================================
+  */
+
+  async function cancelRide() {
+    if (!trip?._id || cancellingTrip) {
+      return;
+    }
+
+    const normalizedStatus = String(trip.status || '')
+      .trim()
+      .toUpperCase();
+
+    const cancellableStatuses = [
+      'SEARCHING_DRIVER',
+      'DRIVER_ASSIGNED',
+      'DRIVER_ARRIVING',
+    ];
+
+    if (!cancellableStatuses.includes(normalizedStatus)) {
+      Alert.alert(
+        'Ride cannot be cancelled',
+        'This ride has already moved beyond the cancellation stage.'
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Cancel this ride?',
+      trip.paymentMethod === 'wallet'
+        ? 'Your ride will be cancelled. Any applicable wallet refund will be handled automatically.'
+        : 'Your ride request will be cancelled.',
+      [
+        {
+          text: 'Keep ride',
+          style: 'cancel',
+        },
+        {
+          text: 'Cancel ride',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setCancellingTrip(true);
+
+              console.log(
+                '[RIDER TRIP] Cancelling ride:',
+                trip._id
+              );
+
+              const response = await api.patch(
+                `/trips/${trip._id}/cancel`
+              );
+
+              const updated =
+                response?.data?.data?.trip ||
+                response?.data?.trip ||
+                null;
+
+              if (updated) {
+                setTrip(updated);
+              } else {
+                await loadTrip(false);
+              }
+
+              setFindingDriver(false);
+              setDriverApproaching(false);
+              setTrackingActive(false);
+              setDriverLocation(null);
+              setDriverDistance(null);
+
+              Alert.alert(
+                'Ride cancelled',
+                response?.data?.message ||
+                  'Your ride has been cancelled.'
+              );
+
+            } catch (error: any) {
+              console.log(
+                '[RIDER CANCEL RIDE ERROR]',
+                error
+              );
+
+              if (error?.response?.status === 401) {
+                setAuthToken();
+                router.replace('/login');
+                return;
+              }
+
+              Alert.alert(
+                'Unable to cancel ride',
+                error?.response?.data?.message ||
+                  'The ride could not be cancelled. Please refresh and try again.'
+              );
+
+              await loadTrip(false);
+
+            } finally {
+              setCancellingTrip(false);
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  /*
+  =======================================================
   RIDER ARRIVAL CONFIRMATION
   =======================================================
   */
@@ -833,9 +941,33 @@ const completionRequested =
   Boolean(trip.driverCompletionRequestedAt) &&
   !completed;
 
+const normalizedTripStatus =
+  String(trip.status || '')
+    .trim()
+    .toUpperCase();
+
+console.log('[RIDER TRIP CANCEL DEBUG]', {
+  rawStatus: trip.status,
+  normalizedStatus: normalizedTripStatus,
+  hasDriver: !!trip.driver,
+  canCancel: [
+    'SEARCHING_DRIVER',
+    'DRIVER_ASSIGNED',
+    'DRIVER_ARRIVING',
+  ].includes(normalizedTripStatus),
+});
 const isSearchingForDriver =
-  trip.status === 'SEARCHING_DRIVER' &&
+  normalizedTripStatus === 'SEARCHING_DRIVER' &&
   !trip.driver;
+
+const canCancelRide =
+  [
+    'SEARCHING_DRIVER',
+    'DRIVER_ASSIGNED',
+    'DRIVER_ARRIVING',
+  ].includes(
+    normalizedTripStatus
+  );
 
   /*
   =======================================================
@@ -913,6 +1045,63 @@ const isSearchingForDriver =
             </Text>
           </View>
         </View>
+
+        {/* =================================================
+            RIDER CANCELLATION
+        ================================================= */}
+
+        {canCancelRide && (
+          <View style={styles.cancelRideCard}>
+            <View style={styles.cancelRideCopy}>
+              <View style={styles.cancelRideIcon}>
+                <Ionicons
+                  name="close-circle-outline"
+                  size={22}
+                  color={RED}
+                />
+              </View>
+
+              <View style={styles.cancelRideTextWrap}>
+                <Text style={styles.cancelRideTitle}>
+                  Need to cancel?
+                </Text>
+
+                <Text style={styles.cancelRideDescription}>
+                  You can cancel before the trip starts.
+                </Text>
+              </View>
+            </View>
+
+            <Pressable
+              onPress={cancelRide}
+              disabled={cancellingTrip}
+              style={({ pressed }) => [
+                styles.cancelRideButton,
+                pressed && styles.cancelRideButtonPressed,
+                cancellingTrip && styles.cancelRideButtonDisabled,
+              ]}
+            >
+              {cancellingTrip ? (
+                <ActivityIndicator
+                  size="small"
+                  color={RED}
+                />
+              ) : (
+                <>
+                  <Ionicons
+                    name="close"
+                    size={18}
+                    color={RED}
+                  />
+
+                  <Text style={styles.cancelRideButtonText}>
+                    CANCEL RIDE
+                  </Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        )}
 
         {/* =================================================
             DRIVER
@@ -1605,6 +1794,75 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 
+  cancelRideCard: {
+    marginBottom: 18,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: SOFT_RED,
+    borderWidth: 1,
+    borderColor: '#F2CACA',
+  },
+
+  cancelRideCopy: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  cancelRideIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: WHITE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  cancelRideTextWrap: {
+    flex: 1,
+    marginLeft: 11,
+  },
+
+  cancelRideTitle: {
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+
+  cancelRideDescription: {
+    marginTop: 3,
+    color: MUTED,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+
+  cancelRideButton: {
+    minHeight: 48,
+    marginTop: 14,
+    borderRadius: 13,
+    borderWidth: 1.5,
+    borderColor: RED,
+    backgroundColor: WHITE,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+
+  cancelRideButtonPressed: {
+    opacity: 0.72,
+  },
+
+  cancelRideButtonDisabled: {
+    opacity: 0.55,
+  },
+
+  cancelRideButtonText: {
+    color: RED,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.3,
+  },
+
   bottomSpace: {
     height: 24,
   },
@@ -2088,3 +2346,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
+
