@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   ActivityIndicator,
@@ -14,6 +14,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
+
+import { Ionicons } from '@expo/vector-icons';
 
 import api, { setAuthToken } from '../services/api';
 import { getStoredToken } from '../storage/auth';
@@ -98,6 +100,14 @@ export default function WalletScreen() {
   const [recipientPhone, setRecipientPhone] = useState('');
   const [sendPin, setSendPin] = useState('');
   const [sendLoading, setSendLoading] = useState(false);
+  const [recipientVerifyLoading, setRecipientVerifyLoading] = useState(false);
+  const [verifiedRecipient, setVerifiedRecipient] = useState<{
+    id: string;
+    fullName: string;
+    maskedPhone: string;
+  } | null>(null);
+  const [verifiedRecipientPhone, setVerifiedRecipientPhone] = useState('');
+  const [transferReview, setTransferReview] = useState(false);
 
   /* ----------------------- WITHDRAW ------------------------- */
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -150,7 +160,7 @@ export default function WalletScreen() {
         Array.isArray(wallet?.transactions) ? wallet.transactions : []
       );
 
-      setHasPin(Boolean(wallet?.hasPin ?? wallet?.has_pin));
+      setHasPin(Boolean(response?.data?.data?.hasTransactionPin));
     } catch (error: any) {
       const message =
         error?.response?.data?.message ||
@@ -188,7 +198,7 @@ export default function WalletScreen() {
      ========================================================= */
 
   const formatMoney = useCallback((value: number) => {
-    return `₦${Number(value || 0).toLocaleString('en-NG', {
+    return `NGN ${Number(value || 0).toLocaleString('en-NG', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}`;
@@ -202,7 +212,7 @@ export default function WalletScreen() {
     const numericAmount = Number(amount.replace(/,/g, ''));
 
     if (!Number.isFinite(numericAmount) || numericAmount < 100) {
-      Alert.alert('Invalid amount', 'Enter at least ₦100.');
+      Alert.alert('Invalid amount', 'Enter at least NGN 100.');
       return;
     }
 
@@ -339,13 +349,13 @@ export default function WalletScreen() {
       setConfirmNewPin('');
       setPinStep('create');
 
-      Alert.alert('Success', 'Transfer PIN created successfully.');
+      Alert.alert('Success', 'Transaction PIN created successfully.');
     } catch (error: any) {
       Alert.alert(
         'PIN Creation Failed',
         error?.response?.data?.message ||
           error?.message ||
-          'Unable to create transfer PIN.'
+          'Unable to create transaction PIN.'
       );
     } finally {
       setPinLoading(false);
@@ -355,6 +365,118 @@ export default function WalletScreen() {
   /* =========================================================
      SEND MONEY
      ========================================================= */
+
+  const resetSendMoney = useCallback(() => {
+    setShowSendMoney(false);
+    setSendAmount('');
+    setRecipientPhone('');
+    setSendPin('');
+    setVerifiedRecipient(null);
+    setVerifiedRecipientPhone('');
+    setTransferReview(false);
+  }, []);
+
+  const handleRecipientPhoneChange = useCallback((value: string) => {
+    setRecipientPhone(value);
+
+    setVerifiedRecipient(null);
+    setVerifiedRecipientPhone('');
+    setTransferReview(false);
+    setSendPin('');
+  }, []);
+
+  const verifyTransferRecipient = useCallback(async () => {
+    const phone = recipientPhone.trim();
+
+    if (!phone) {
+      Alert.alert(
+        'Recipient required',
+        'Enter the recipient phone number.'
+      );
+      return;
+    }
+
+    try {
+      setRecipientVerifyLoading(true);
+
+      const response = await api.post(
+        '/wallet/transfer/verify-recipient',
+        { phone }
+      );
+
+      const recipient = response?.data?.data?.recipient;
+
+      if (!recipient?.id || !recipient?.fullName) {
+        throw new Error('Recipient details were not returned.');
+      }
+
+      setVerifiedRecipient({
+        id: String(recipient.id),
+        fullName: String(recipient.fullName),
+        maskedPhone: String(recipient.maskedPhone || phone),
+      });
+
+      setVerifiedRecipientPhone(phone);
+      setTransferReview(false);
+      setSendPin('');
+    } catch (error: any) {
+      setVerifiedRecipient(null);
+      setVerifiedRecipientPhone('');
+      setTransferReview(false);
+      setSendPin('');
+
+      Alert.alert(
+        'Recipient Not Verified',
+        error?.response?.data?.message ||
+          error?.message ||
+          'Unable to verify this Kaduna Only wallet.'
+      );
+    } finally {
+      setRecipientVerifyLoading(false);
+    }
+  }, [recipientPhone]);
+
+  const reviewTransfer = useCallback(() => {
+    const phone = recipientPhone.trim();
+    const numericAmount = Number(sendAmount.replace(/,/g, ''));
+
+    if (
+      !verifiedRecipient ||
+      !verifiedRecipientPhone ||
+      phone !== verifiedRecipientPhone
+    ) {
+      Alert.alert(
+        'Verify recipient',
+        'Verify the Kaduna Only wallet before continuing.'
+      );
+      return;
+    }
+
+    if (!Number.isInteger(numericAmount) || numericAmount < 1) {
+      Alert.alert(
+        'Invalid amount',
+        'Enter a valid whole naira amount.'
+      );
+      return;
+    }
+
+    if (numericAmount > balance) {
+      Alert.alert(
+        'Insufficient balance',
+        'You do not have enough money in your wallet.'
+      );
+      return;
+    }
+
+    setSendPin('');
+    setTransferReview(true);
+  }, [
+    recipientPhone,
+    sendAmount,
+    verifiedRecipient,
+    verifiedRecipientPhone,
+    balance,
+  ]);
 
   const sendMoney = useCallback(async () => {
     const numericAmount = Number(sendAmount.replace(/,/g, ''));
@@ -371,8 +493,21 @@ export default function WalletScreen() {
       return;
     }
 
+    if (
+      !verifiedRecipient ||
+      !verifiedRecipientPhone ||
+      phone !== verifiedRecipientPhone
+    ) {
+      Alert.alert(
+        'Verify recipient',
+        'Verify the Kaduna Only wallet before transferring money.'
+      );
+      setTransferReview(false);
+      return;
+    }
+
     if (!isValidPin(pin)) {
-      Alert.alert('Wallet PIN required', 'Enter your 4 to 6 digit wallet PIN.');
+      Alert.alert('Transaction PIN required', 'Enter your 4 to 6 digit transaction PIN.');
       return;
     }
 
@@ -402,10 +537,7 @@ export default function WalletScreen() {
         );
       }
 
-      setShowSendMoney(false);
-      setSendAmount('');
-      setRecipientPhone('');
-      setSendPin('');
+      resetSendMoney();
 
       Alert.alert(
         'Transfer Successful',
@@ -423,7 +555,16 @@ export default function WalletScreen() {
     } finally {
       setSendLoading(false);
     }
-  }, [sendAmount, recipientPhone, sendPin, balance, loadWallet]);
+  }, [
+    sendAmount,
+    recipientPhone,
+    sendPin,
+    balance,
+    loadWallet,
+    verifiedRecipient,
+    verifiedRecipientPhone,
+    resetSendMoney,
+  ]);
 
   /* =========================================================
      LOAD BANKS
@@ -567,7 +708,7 @@ export default function WalletScreen() {
     if (!Number.isInteger(numericAmount) || numericAmount < 100) {
       Alert.alert(
         'Invalid amount',
-        'Enter a valid withdrawal amount of at least ₦100.'
+        'Enter a valid withdrawal amount of at least NGN 100.'
       );
       return;
     }
@@ -599,7 +740,7 @@ export default function WalletScreen() {
     }
 
     if (!isValidPin(pin)) {
-      Alert.alert('Wallet PIN required', 'Enter your 4 to 6 digit wallet PIN.');
+      Alert.alert('Transaction PIN required', 'Enter your 4 to 6 digit transaction PIN.');
       return;
     }
 
@@ -717,7 +858,7 @@ export default function WalletScreen() {
             style={styles.topUpButton}
             onPress={() => setShowTopUp(true)}
           >
-            <Text style={styles.topUpText}>+ Top Up Wallet</Text>
+            <Text style={styles.topUpText}>Add Money</Text>
           </Pressable>
         </View>
 
@@ -725,10 +866,10 @@ export default function WalletScreen() {
         <View style={styles.actions}>
           <Pressable style={styles.actionCard} onPress={() => setShowTopUp(true)}>
             <View style={styles.actionIcon}>
-              <Text style={styles.actionIconText}>+</Text>
+              <Ionicons name="add-circle" size={22} color={PURPLE} />
             </View>
-            <Text style={styles.actionTitle}>Top Up</Text>
-            <Text style={styles.actionSubtitle}>Add money</Text>
+            <Text style={styles.actionTitle}>Add Money</Text>
+            <Text style={styles.actionSubtitle}>Fund wallet</Text>
           </Pressable>
 
           <Pressable
@@ -742,10 +883,10 @@ export default function WalletScreen() {
             }}
           >
             <View style={styles.actionIcon}>
-              <Text style={styles.actionIconText}>→</Text>
+              <Ionicons name="arrow-up-circle" size={22} color={PURPLE} />
             </View>
-            <Text style={styles.actionTitle}>Send Money</Text>
-            <Text style={styles.actionSubtitle}>To another user</Text>
+            <Text style={styles.actionTitle}>Transfer</Text>
+            <Text style={styles.actionSubtitle}>Kaduna Only Wallet</Text>
           </Pressable>
 
           <Pressable
@@ -764,16 +905,16 @@ export default function WalletScreen() {
             }}
           >
             <View style={styles.actionIcon}>
-              <Text style={styles.actionIconText}>₦</Text>
+              <Ionicons name="arrow-down-circle" size={22} color={PURPLE} />
             </View>
             <Text style={styles.actionTitle}>Withdraw</Text>
-            <Text style={styles.actionSubtitle}>To local bank</Text>
+            <Text style={styles.actionSubtitle}>Bank Account</Text>
           </Pressable>
         </View>
 
         {/* REFRESH */}
         <Pressable style={styles.refreshAction} onPress={refreshWallet}>
-          <Text style={styles.refreshActionText}>↻ Refresh Wallet</Text>
+          <Text style={styles.refreshActionText}>Refresh Wallet</Text>
         </Pressable>
 
         {/* WALLET SECURITY CARD */}
@@ -783,43 +924,34 @@ export default function WalletScreen() {
 
         <View style={styles.securityCard}>
           <View style={styles.securityLeft}>
-            <View style={styles.securityIconCircle}>
-              <Text style={styles.securityIconText}>🔒</Text>
-            </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.securityTitle}>Transfer PIN</Text>
+              <Text style={styles.securityTitle}>Transaction PIN</Text>
               <Text style={styles.securitySubtitle}>
-                Protect your wallet transactions
+                Use one PIN to secure transfers and bank withdrawals.
               </Text>
             </View>
           </View>
 
-          <Pressable
-            style={[
-              styles.securityButton,
-              hasPin && styles.securityButtonActive,
-            ]}
-            onPress={() => {
-              if (hasPin) {
-                Alert.alert('PIN Active', 'Your transfer PIN is already set.');
-              } else {
+          {hasPin ? (
+            <View style={styles.pinActivePanel}>
+              <Text style={styles.pinActiveTitle}>PIN Active</Text>
+              <Text style={styles.pinActiveText}>
+                Your transaction PIN is set and protects transfers and withdrawals.
+              </Text>
+            </View>
+          ) : (
+            <Pressable
+              style={styles.securityButton}
+              onPress={() => {
                 setPinStep('create');
                 setNewPin('');
                 setConfirmNewPin('');
                 setShowCreatePin(true);
-              }
-            }}
-            disabled={hasPin}
-          >
-            <Text
-              style={[
-                styles.securityButtonText,
-                hasPin && styles.securityButtonTextActive,
-              ]}
+              }}
             >
-              {hasPin ? '✓ PIN Active' : 'Create Transfer PIN'}
-            </Text>
-          </Pressable>
+              <Text style={styles.securityButtonText}>Create Transaction PIN</Text>
+            </Pressable>
+          )}
         </View>
 
         {/* PAYMENT PENDING CARD */}
@@ -934,7 +1066,7 @@ export default function WalletScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Top Up Wallet</Text>
+            <Text style={styles.modalTitle}>Add Money</Text>
             <Text style={styles.modalSubtitle}>
               Enter the amount you want to add to your Kaduna Only wallet.
             </Text>
@@ -956,7 +1088,7 @@ export default function WalletScreen() {
                   onPress={() => setAmount(String(value))}
                 >
                   <Text style={styles.amountChipText}>
-                    ₦{value.toLocaleString()}
+                    NGN {value.toLocaleString()}
                   </Text>
                 </Pressable>
               ))}
@@ -993,64 +1125,162 @@ export default function WalletScreen() {
         visible={showSendMoney}
         transparent
         animationType="slide"
-        onRequestClose={() => setShowSendMoney(false)}
+        onRequestClose={resetSendMoney}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Send Money</Text>
-            <Text style={styles.modalSubtitle}>
-              Send money instantly to another Kaduna Only user.
+            <Text style={styles.modalTitle}>
+              Transfer to Kaduna Only Wallet
             </Text>
 
-            <TextInput
-              value={recipientPhone}
-              onChangeText={setRecipientPhone}
-              placeholder="Recipient phone number"
-              placeholderTextColor="#999"
-              keyboardType="phone-pad"
-              style={styles.input}
-            />
+            {!transferReview ? (
+              <>
+                <Text style={styles.modalSubtitle}>
+                  Verify the recipient before transferring money.
+                </Text>
 
-            <TextInput
-              value={sendAmount}
-              onChangeText={setSendAmount}
-              placeholder="Amount in Naira"
-              placeholderTextColor="#999"
-              keyboardType="numeric"
-              style={styles.input}
-            />
+                <TextInput
+                  value={recipientPhone}
+                  onChangeText={handleRecipientPhoneChange}
+                  placeholder="Recipient phone number"
+                  placeholderTextColor="#999"
+                  keyboardType="phone-pad"
+                  style={styles.input}
+                  editable={!recipientVerifyLoading}
+                />
 
-            <TextInput
-              value={sendPin}
-              onChangeText={setSendPin}
-              placeholder="Wallet PIN"
-              placeholderTextColor="#999"
-              keyboardType="numeric"
-              secureTextEntry
-              maxLength={6}
-              style={styles.input}
-            />
+                <Pressable
+                  style={[
+                    styles.verifyRecipientButton,
+                    recipientVerifyLoading &&
+                      styles.verifyRecipientButtonDisabled,
+                  ]}
+                  onPress={verifyTransferRecipient}
+                  disabled={recipientVerifyLoading}
+                >
+                  {recipientVerifyLoading ? (
+                    <ActivityIndicator color={GREEN} />
+                  ) : (
+                    <Text style={styles.verifyRecipientButtonText}>
+                      Verify Recipient
+                    </Text>
+                  )}
+                </Pressable>
 
-            <Pressable
-              style={styles.modalPrimary}
-              onPress={sendMoney}
-              disabled={sendLoading}
-            >
-              {sendLoading ? (
-                <ActivityIndicator color={WHITE} />
-              ) : (
-                <Text style={styles.modalPrimaryText}>Send Money</Text>
-              )}
-            </Pressable>
+                {verifiedRecipient &&
+                  verifiedRecipientPhone === recipientPhone.trim() && (
+                    <View style={styles.verifiedRecipientCard}>
+                      <Text style={styles.verifiedRecipientLabel}>
+                        VERIFIED KADUNA ONLY WALLET
+                      </Text>
+
+                      <Text style={styles.verifiedRecipientName}>
+                        {verifiedRecipient.fullName}
+                      </Text>
+
+                      <Text style={styles.verifiedRecipientPhone}>
+                        {verifiedRecipient.maskedPhone}
+                      </Text>
+                    </View>
+                  )}
+
+                {verifiedRecipient &&
+                  verifiedRecipientPhone === recipientPhone.trim() && (
+                    <>
+                      <TextInput
+                        value={sendAmount}
+                        onChangeText={setSendAmount}
+                        placeholder="Amount in Naira"
+                        placeholderTextColor="#999"
+                        keyboardType="numeric"
+                        style={styles.input}
+                      />
+
+                      <Pressable
+                        style={styles.modalPrimary}
+                        onPress={reviewTransfer}
+                      >
+                        <Text style={styles.modalPrimaryText}>
+                          Review Transfer
+                        </Text>
+                      </Pressable>
+                    </>
+                  )}
+              </>
+            ) : (
+              <>
+                <Text style={styles.modalSubtitle}>
+                  Review these details carefully before confirming.
+                </Text>
+
+                <View style={styles.transferReviewCard}>
+                  <Text style={styles.transferReviewLabel}>
+                    RECIPIENT
+                  </Text>
+
+                  <Text style={styles.transferReviewName}>
+                    {verifiedRecipient?.fullName}
+                  </Text>
+
+                  <Text style={styles.transferReviewDetail}>
+                    {verifiedRecipient?.maskedPhone}
+                  </Text>
+
+                  <View style={styles.transferReviewDivider} />
+
+                  <Text style={styles.transferReviewLabel}>
+                    AMOUNT
+                  </Text>
+
+                  <Text style={styles.transferReviewAmount}>
+                    NGN {Number(sendAmount.replace(/,/g, '') || 0).toLocaleString('en-NG')}
+                  </Text>
+                </View>
+
+                <TextInput
+                  value={sendPin}
+                  onChangeText={setSendPin}
+                  placeholder="Transaction PIN"
+                  placeholderTextColor="#999"
+                  keyboardType="numeric"
+                  secureTextEntry
+                  maxLength={6}
+                  style={styles.input}
+                />
+
+                <Pressable
+                  style={styles.modalPrimary}
+                  onPress={sendMoney}
+                  disabled={sendLoading}
+                >
+                  {sendLoading ? (
+                    <ActivityIndicator color={WHITE} />
+                  ) : (
+                    <Text style={styles.modalPrimaryText}>
+                      Confirm Transfer
+                    </Text>
+                  )}
+                </Pressable>
+
+                <Pressable
+                  style={styles.transferBackButton}
+                  onPress={() => {
+                    setTransferReview(false);
+                    setSendPin('');
+                  }}
+                  disabled={sendLoading}
+                >
+                  <Text style={styles.transferBackButtonText}>
+                    Back to Transfer Details
+                  </Text>
+                </Pressable>
+              </>
+            )}
 
             <Pressable
               style={styles.modalCancel}
-              onPress={() => {
-                setShowSendMoney(false);
-                setSendAmount('');
-                setRecipientPhone('');
-                setSendPin('');
-              }}
+              onPress={resetSendMoney}
+              disabled={sendLoading}
             >
               <Text style={styles.modalCancelText}>Cancel</Text>
             </Pressable>
@@ -1076,10 +1306,10 @@ export default function WalletScreen() {
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.modal}>
-              <Text style={styles.modalTitle}>Withdraw to Bank</Text>
+              <Text style={styles.modalTitle}>Withdraw to Bank Account</Text>
               <Text style={styles.modalSubtitle}>
                 Withdraw your Kaduna Only wallet balance to a Nigerian bank
-                account. Minimum ₦100.
+                account. Minimum NGN 100.
               </Text>
 
               {/* BANK DROPDOWN */}
@@ -1102,7 +1332,7 @@ export default function WalletScreen() {
                   {selectedBank ? selectedBank.name : 'Choose a bank'}
                 </Text>
                 <Text style={styles.dropdownChevron}>
-                  {bankDropdownOpen ? '▲' : '▼'}
+                  {bankDropdownOpen ? 'Hide' : 'Show'}
                 </Text>
               </Pressable>
 
@@ -1151,7 +1381,7 @@ export default function WalletScreen() {
                           >
                             <Text style={styles.dropdownItemText}>{name}</Text>
                             {isSelected && (
-                              <Text style={styles.dropdownItemCheck}>✓</Text>
+                              <Text style={styles.dropdownItemCheck}></Text>
                             )}
                           </Pressable>
                         );
@@ -1161,7 +1391,7 @@ export default function WalletScreen() {
                 </View>
               )}
 
-              {/* ACCOUNT NUMBER — auto-verify on 10 digits */}
+              {/* ACCOUNT NUMBER - auto-verify on 10 digits */}
               <TextInput
                 value={accountNumber}
                 onChangeText={(value) => {
@@ -1182,7 +1412,7 @@ export default function WalletScreen() {
                   <View style={styles.resolvingRow}>
                     <ActivityIndicator size="small" color={PURPLE} />
                     <Text style={styles.resolvingText}>
-                      Resolving account name…
+                      Resolving account name...
                     </Text>
                   </View>
                 )}
@@ -1193,7 +1423,7 @@ export default function WalletScreen() {
                   <Text style={styles.verifiedBankLabel}>Verified account</Text>
                   <Text style={styles.verifiedBankName}>{accountName}</Text>
                   <Text style={styles.verifiedBankNumber}>
-                    {accountNumber} · {selectedBank?.name}
+                    {accountNumber} - {selectedBank?.name}
                   </Text>
                 </View>
               ) : null}
@@ -1202,7 +1432,7 @@ export default function WalletScreen() {
               <TextInput
                 value={withdrawAmount}
                 onChangeText={setWithdrawAmount}
-                placeholder="Withdrawal amount (min ₦100)"
+                placeholder="Withdrawal amount (min NGN 100)"
                 placeholderTextColor="#999"
                 keyboardType="numeric"
                 style={styles.input}
@@ -1212,7 +1442,7 @@ export default function WalletScreen() {
               <TextInput
                 value={withdrawPin}
                 onChangeText={setWithdrawPin}
-                placeholder="Wallet PIN"
+                placeholder="Transaction PIN"
                 placeholderTextColor="#999"
                 keyboardType="numeric"
                 secureTextEntry
@@ -1232,7 +1462,7 @@ export default function WalletScreen() {
                 {isWithdrawLoading ? (
                   <ActivityIndicator color={WHITE} />
                 ) : (
-                  <Text style={styles.modalPrimaryText}>Withdraw Money</Text>
+                  <Text style={styles.modalPrimaryText}>Confirm Withdrawal</Text>
                 )}
               </Pressable>
 
@@ -1268,7 +1498,7 @@ export default function WalletScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
             <Text style={styles.modalTitle}>
-              {pinStep === 'create' ? 'Create Transfer PIN' : 'Confirm PIN'}
+              {pinStep === 'create' ? 'Create Transaction PIN' : 'Confirm PIN'}
             </Text>
             <Text style={styles.modalSubtitle}>
               {pinStep === 'create'
@@ -1355,9 +1585,9 @@ export default function WalletScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Transfer PIN Required</Text>
+            <Text style={styles.modalTitle}>Transaction PIN Required</Text>
             <Text style={styles.modalSubtitle}>
-              Create your transfer PIN before sending money or making
+              Create your transaction PIN before transferring money or making
               withdrawals.
             </Text>
 
@@ -1495,8 +1725,9 @@ const styles = StyleSheet.create({
 
   actionIconText: {
     color: PURPLE,
-    fontSize: 21,
+    fontSize: 9,
     fontWeight: '900',
+    letterSpacing: 0.4,
   },
 
   actionTitle: {
@@ -1586,6 +1817,28 @@ const styles = StyleSheet.create({
 
   securityButtonTextActive: {
     color: GREEN,
+  },
+
+  pinActivePanel: {
+    borderRadius: 12,
+    backgroundColor: '#E7F7EF',
+    borderWidth: 1,
+    borderColor: '#CBEBDD',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+
+  pinActiveTitle: {
+    color: GREEN,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+
+  pinActiveText: {
+    marginTop: 4,
+    color: '#426456',
+    fontSize: 11,
+    lineHeight: 16,
   },
 
   /* -------------------- PENDING CARD ---------------------- */
@@ -1748,6 +2001,113 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     padding: 22,
     paddingBottom: 30,
+  },
+
+  verifyRecipientButton: {
+    minHeight: 48,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: GREEN,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+
+  verifyRecipientButtonDisabled: {
+    opacity: 0.6,
+  },
+
+  verifyRecipientButtonText: {
+    color: GREEN,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  verifiedRecipientCard: {
+    marginTop: 14,
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: '#E7F7EF',
+    borderWidth: 1,
+    borderColor: '#B9E8CF',
+  },
+
+  verifiedRecipientLabel: {
+    color: GREEN,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+
+  verifiedRecipientName: {
+    marginTop: 7,
+    color: TEXT,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+
+  verifiedRecipientPhone: {
+    marginTop: 4,
+    color: MUTED,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  transferReviewCard: {
+    marginTop: 20,
+    padding: 17,
+    borderRadius: 14,
+    backgroundColor: '#F8F7FB',
+    borderWidth: 1,
+    borderColor: '#E4E0EC',
+  },
+
+  transferReviewLabel: {
+    color: MUTED,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.7,
+  },
+
+  transferReviewName: {
+    marginTop: 6,
+    color: TEXT,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+
+  transferReviewDetail: {
+    marginTop: 4,
+    color: MUTED,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  transferReviewDivider: {
+    height: 1,
+    marginVertical: 15,
+    backgroundColor: '#E4E0EC',
+  },
+
+  transferReviewAmount: {
+    marginTop: 6,
+    color: TEXT,
+    fontSize: 22,
+    fontWeight: '900',
+  },
+
+  transferBackButton: {
+    minHeight: 46,
+    marginTop: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  transferBackButtonText: {
+    color: GREEN,
+    fontSize: 13,
+    fontWeight: '800',
   },
 
   modalTitle: {

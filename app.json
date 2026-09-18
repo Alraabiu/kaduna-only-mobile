@@ -1,4 +1,4 @@
-﻿{
+{
   "expo": {
     "name": "Kaduna Only",
     "slug": "kaduna-only",
@@ -62,11 +62,15 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": true,
+            "buildArchs": [
+              "arm64-v8a"
+            ]
           }
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -86,5 +90,3 @@
     }
   }
 }
-
-

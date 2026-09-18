@@ -1144,7 +1144,7 @@ export default function DriverHome() {
               }
 
             },
-            10000
+            60000
           );
 
 

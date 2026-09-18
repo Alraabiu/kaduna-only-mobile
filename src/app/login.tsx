@@ -21,6 +21,8 @@ import {
 
 import { Ionicons } from '@expo/vector-icons';
 
+import * as SecureStore from 'expo-secure-store';
+
 import api, {
   setAuthToken,
 } from '../services/api';
@@ -55,6 +57,117 @@ export default function Login() {
     useState(false);
 
 
+  const [verificationRequired, setVerificationRequired] =
+    useState(false);
+
+  const [verificationCode, setVerificationCode] =
+    useState('');
+
+  const [verificationDeviceId, setVerificationDeviceId] =
+    useState('');
+
+
+  /*
+  =======================================================
+  DEVICE ID
+  =======================================================
+  */
+
+  async function getOrCreateDeviceId() {
+
+    const storageKey =
+      'kaduna_only_installation_device_id';
+
+    const existing =
+      await SecureStore.getItemAsync(
+        storageKey
+      );
+
+    if (existing) {
+
+      return existing;
+
+    }
+
+
+    const randomPart =
+      `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+
+    const newDeviceId =
+      `kaduna-mobile-${Platform.OS}-${randomPart}`;
+
+
+    await SecureStore.setItemAsync(
+      storageKey,
+      newDeviceId
+    );
+
+
+    return newDeviceId;
+
+  }
+
+
+  /*
+  =======================================================
+  COMPLETE AUTHENTICATION
+  =======================================================
+  */
+
+  async function completeAuthentication(
+    user: any,
+    token: string
+  ) {
+
+    await saveAuth(
+      user,
+      token
+    );
+
+
+    setAuthToken(
+      token
+    );
+
+
+    const role =
+      String(
+        user?.role || ''
+      )
+        .trim()
+        .toLowerCase();
+
+
+    if (role === 'driver') {
+
+      router.replace(
+        '/driver'
+      );
+
+      return;
+
+    }
+
+
+    if (role === 'rider') {
+
+      router.replace(
+        '/rider'
+      );
+
+      return;
+
+    }
+
+
+    Alert.alert(
+      'Login Error',
+      'This account cannot use the Kaduna Only mobile app.'
+    );
+
+  }
+
+
   /*
   =======================================================
   LOGIN
@@ -75,6 +188,7 @@ export default function Login() {
       );
 
       return;
+
     }
 
 
@@ -86,6 +200,7 @@ export default function Login() {
       );
 
       return;
+
     }
 
 
@@ -95,7 +210,7 @@ export default function Login() {
     try {
 
       const deviceId =
-        `kaduna-mobile-${Platform.OS}`;
+        await getOrCreateDeviceId();
 
 
       const deviceName =
@@ -113,26 +228,43 @@ export default function Login() {
           '/auth/login',
           {
             phone: cleanPhone,
-
             password,
-
             deviceId,
-
             deviceName,
-
             platform,
           }
         );
 
 
-      console.log(
-        '[MOBILE LOGIN RESPONSE]',
-        response.data
-      );
-
-
       const result =
         response?.data;
+
+
+      if (
+        result?.requiresDeviceVerification === true ||
+        result?.code === 'OTP_REQUIRED'
+      ) {
+
+        const returnedDeviceId =
+          String(
+            result?.data?.deviceId ||
+            deviceId
+          ).trim();
+
+
+        setVerificationDeviceId(
+          returnedDeviceId
+        );
+
+        setVerificationCode('');
+
+        setVerificationRequired(
+          true
+        );
+
+        return;
+
+      }
 
 
       if (
@@ -149,103 +281,15 @@ export default function Login() {
       }
 
 
-      const token =
-        result.data.token;
-
-
-      const user =
-        result.data.user;
-
-
-      /*
-      =====================================================
-      SAVE AUTH
-      =====================================================
-      */
-
-      await saveAuth(
-        user,
-        token
+      await completeAuthentication(
+        result.data.user,
+        result.data.token
       );
 
-
-      setAuthToken(
-        token
-      );
-
-
-      console.log(
-        '[MOBILE LOGIN] Authentication saved'
-      );
-
-      console.log(
-        '[MOBILE LOGIN] Role:',
-        user.role
-      );
-
-
-      /*
-      =====================================================
-      ROLE ROUTING
-      =====================================================
-      */
-
-      const role =
-        String(
-          user?.role || ''
-        )
-          .trim()
-          .toLowerCase();
-
-
-      if (role === 'driver') {
-
-        router.replace(
-          '/driver'
-        );
-
-        return;
-
-      }
-
-
-      if (role === 'rider') {
-
-        router.replace(
-          '/rider'
-        );
-
-        return;
-
-      }
-
-
-      if (role === 'admin') {
-
-        Alert.alert(
-          'Login Successful',
-          'Admin account detected. The mobile admin dashboard will be added next.'
-        );
-
-        return;
-
-      }
-
-
-      Alert.alert(
-        'Login Error',
-        `Unknown account role: ${user.role}`
-      );
 
     } catch (
       error: any
     ) {
-
-      console.log(
-        '[MOBILE LOGIN ERROR]',
-        error
-      );
-
 
       let message =
         'Unable to connect to Kaduna Only.';
@@ -284,6 +328,133 @@ export default function Login() {
 
   /*
   =======================================================
+  VERIFY NEW DEVICE
+  =======================================================
+  */
+
+  async function handleVerifyDevice() {
+
+    const cleanPhone =
+      phone.trim();
+
+    const cleanCode =
+      verificationCode.trim();
+
+
+    if (!/^\d{6}$/.test(cleanCode)) {
+
+      Alert.alert(
+        'Verification',
+        'Please enter the 6 digit verification code.'
+      );
+
+      return;
+
+    }
+
+
+    if (!verificationDeviceId) {
+
+      Alert.alert(
+        'Verification',
+        'Device verification information is missing. Please log in again.'
+      );
+
+      setVerificationRequired(
+        false
+      );
+
+      return;
+
+    }
+
+
+    setLoading(true);
+
+
+    try {
+
+      const response =
+        await api.post(
+          '/auth/verify-device',
+          {
+            phone:
+              cleanPhone,
+
+            deviceId:
+              verificationDeviceId,
+
+            otp:
+              cleanCode,
+          }
+        );
+
+
+      const result =
+        response?.data;
+
+
+      if (
+        !result?.success ||
+        !result?.data?.token ||
+        !result?.data?.user
+      ) {
+
+        throw new Error(
+          result?.message ||
+          'Device verification failed.'
+        );
+
+      }
+
+
+      await completeAuthentication(
+        result.data.user,
+        result.data.token
+      );
+
+
+    } catch (
+      error: any
+    ) {
+
+      let message =
+        'Unable to verify this device.';
+
+
+      if (
+        error?.response?.data?.message
+      ) {
+
+        message =
+          error.response.data.message;
+
+      } else if (
+        error?.message
+      ) {
+
+        message =
+          error.message;
+
+      }
+
+
+      Alert.alert(
+        'Verification Failed',
+        message
+      );
+
+    } finally {
+
+      setLoading(false);
+
+    }
+
+  }
+
+
+  /*
+  =======================================================
   NAVIGATION
   =======================================================
   */
@@ -299,6 +470,182 @@ export default function Login() {
 
     router.push(
       '/register'
+    );
+
+  }
+
+
+  if (verificationRequired) {
+
+    return (
+
+      <KeyboardAvoidingView
+        style={styles.screen}
+        behavior={
+          Platform.OS === 'ios'
+            ? 'padding'
+            : undefined
+        }
+      >
+
+        <ScrollView
+          contentContainerStyle={
+            styles.container
+          }
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+
+          <Pressable
+            onPress={() => {
+              if (loading) return;
+              setVerificationRequired(false);
+              setVerificationCode('');
+              setVerificationDeviceId('');
+            }}
+            style={styles.backButton}
+            disabled={loading}
+          >
+
+            <Ionicons
+              name="chevron-back"
+              size={28}
+              color={BrandColors.text}
+            />
+
+          </Pressable>
+
+
+          <View
+            style={styles.verificationHeader}
+          >
+
+            <View
+              style={styles.verificationIcon}
+            >
+
+              <Ionicons
+                name="shield-checkmark-outline"
+                size={32}
+                color={BrandColors.primary}
+              />
+
+            </View>
+
+
+            <Text
+              style={styles.title}
+            >
+              Verify New Device
+            </Text>
+
+
+            <Text
+              style={styles.verificationSubtitle}
+            >
+              We sent a 6 digit verification code to your registered phone number.
+            </Text>
+
+          </View>
+
+
+          <View
+            style={styles.form}
+          >
+
+            <View
+              style={styles.field}
+            >
+
+              <Text
+                style={styles.label}
+              >
+                Verification Code
+              </Text>
+
+
+              <TextInput
+                value={verificationCode}
+                onChangeText={(value) =>
+                  setVerificationCode(
+                    value
+                      .replace(/\D/g, '')
+                      .slice(0, 6)
+                  )
+                }
+                placeholder="Enter 6 digit code"
+                placeholderTextColor={
+                  BrandColors.textLight
+                }
+                keyboardType="number-pad"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!loading}
+                maxLength={6}
+                style={[
+                  styles.input,
+                  styles.verificationInput,
+                ]}
+              />
+
+            </View>
+
+
+            <Pressable
+              onPress={handleVerifyDevice}
+              disabled={
+                loading ||
+                verificationCode.length !== 6
+              }
+              style={({ pressed }) => [
+                styles.loginButton,
+
+                pressed &&
+                  styles.buttonPressed,
+
+                (
+                  loading ||
+                  verificationCode.length !== 6
+                ) &&
+                  styles.disabledButton,
+              ]}
+            >
+
+              {loading ? (
+
+                <ActivityIndicator
+                  color={
+                    BrandColors.white
+                  }
+                />
+
+              ) : (
+
+                <Text
+                  style={
+                    styles.loginButtonText
+                  }
+                >
+                  Verify Device
+                </Text>
+
+              )}
+
+            </Pressable>
+
+
+            <Text
+              style={styles.verificationHelp}
+            >
+              The code expires in 5 minutes. If it expires, return to login and sign in again to request a new code.
+            </Text>
+
+          </View>
+
+        </ScrollView>
+
+      </KeyboardAvoidingView>
+
     );
 
   }
@@ -1312,6 +1659,115 @@ const styles =
 
       color:
         BrandColors.primary,
+
+    },
+
+
+    /*
+    -------------------------------------------------------
+    DEVICE VERIFICATION
+    -------------------------------------------------------
+    */
+
+    verificationHeader: {
+
+      width:
+        '100%',
+
+      alignItems:
+        'center',
+
+      marginTop:
+        24,
+
+      marginBottom:
+        32,
+
+    },
+
+
+    verificationIcon: {
+
+      width:
+        64,
+
+      height:
+        64,
+
+      borderRadius:
+        32,
+
+      alignItems:
+        'center',
+
+      justifyContent:
+        'center',
+
+      backgroundColor:
+        BrandColors.primaryLight,
+
+      marginBottom:
+        18,
+
+    },
+
+
+    verificationSubtitle: {
+
+      marginTop:
+        10,
+
+      maxWidth:
+        310,
+
+      textAlign:
+        'center',
+
+      fontSize:
+        13,
+
+      lineHeight:
+        20,
+
+      color:
+        BrandColors.textSecondary,
+
+    },
+
+
+    verificationInput: {
+
+      textAlign:
+        'center',
+
+      fontSize:
+        20,
+
+      fontWeight:
+        '700',
+
+      letterSpacing:
+        6,
+
+    },
+
+
+    verificationHelp: {
+
+      marginTop:
+        18,
+
+      textAlign:
+        'center',
+
+      fontSize:
+        11,
+
+      lineHeight:
+        17,
+
+      color:
+        BrandColors.textSecondary,
 
     },
 
