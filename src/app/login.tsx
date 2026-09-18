@@ -19,6 +19,8 @@ import {
   router,
 } from 'expo-router';
 
+import { Ionicons } from '@expo/vector-icons';
+
 import api, {
   setAuthToken,
 } from '../services/api';
@@ -58,256 +60,228 @@ export default function Login() {
   LOGIN
   =======================================================
   */
-async function handleLogin() {
 
-  const cleanPhone =
-    phone.trim();
+  async function handleLogin() {
 
+    const cleanPhone =
+      phone.trim();
 
-  if (!cleanPhone) {
 
-    Alert.alert(
-      'Login',
-      'Please enter your phone number.'
-    );
-
-    return;
-  }
-
-
-  if (!password) {
-
-    Alert.alert(
-      'Login',
-      'Please enter your password.'
-    );
-
-    return;
-  }
-
-
-  setLoading(true);
-
-
-  try {
-
-
-    const deviceId =
-      `kaduna-mobile-${Platform.OS}`;
-
-
-    const deviceName =
-      Platform.OS === 'android'
-        ? 'Android Mobile'
-        : 'iPhone';
-
-
-    const platform =
-      Platform.OS;
-
-
-
-    const response =
-      await api.post(
-        '/auth/login',
-        {
-          phone: cleanPhone,
-
-          password,
-
-          deviceId,
-
-          deviceName,
-
-          platform,
-        }
-      );
-
-
-
-    console.log(
-      '[MOBILE LOGIN RESPONSE]',
-      response.data
-    );
-
-
-
-    const result =
-      response?.data;
-
-
-
-    if (
-      !result?.success ||
-      !result?.data?.token ||
-      !result?.data?.user
-    ) {
-
-      throw new Error(
-        result?.message ||
-        'Login failed. Invalid server response.'
-      );
-
-    }
-
-
-
-    const token =
-      result.data.token;
-
-
-
-    const user =
-      result.data.user;
-
-
-
-    /*
-    =====================================================
-    SAVE AUTH
-    =====================================================
-    */
-
-
-    await saveAuth(
-      user,
-      token
-    );
-
-
-
-    setAuthToken(
-      token
-    );
-
-
-
-    console.log(
-      '[MOBILE LOGIN] Authentication saved'
-    );
-
-
-    console.log(
-      '[MOBILE LOGIN] Role:',
-      user.role
-    );
-
-
-
-    /*
-    =====================================================
-    ROLE ROUTING
-    =====================================================
-    */
-
-
-    const role =
-      String(
-        user?.role || ''
-      )
-        .trim()
-        .toLowerCase();
-
-
-
-    if (
-      role === 'driver'
-    ) {
-
-      router.replace(
-        '/driver'
-      );
-
-      return;
-
-    }
-
-
-
-    if (
-      role === 'rider'
-    ) {
-
-      router.replace(
-        '/rider'
-      );
-
-      return;
-
-    }
-
-
-
-    if (
-      role === 'admin'
-    ) {
+    if (!cleanPhone) {
 
       Alert.alert(
-        'Login Successful',
-        'Admin account detected. The mobile admin dashboard will be added next.'
+        'Login',
+        'Please enter your phone number.'
       );
 
       return;
-
     }
 
 
+    if (!password) {
 
-    Alert.alert(
-      'Login Error',
-      `Unknown account role: ${user.role}`
-    );
+      Alert.alert(
+        'Login',
+        'Please enter your password.'
+      );
 
-
-  } catch (
-    error: any
-  ) {
-
-
-    console.log(
-      '[MOBILE LOGIN ERROR]',
-      error
-    );
-
-
-
-    let message =
-      'Unable to connect to Kaduna Only.';
-
-
-
-    if (
-      error?.response?.data?.message
-    ) {
-
-      message =
-        error.response.data.message;
-
-
-    } else if (
-      error?.message
-    ) {
-
-      message =
-        error.message;
-
+      return;
     }
 
 
-
-    Alert.alert(
-      'Login Failed',
-      message
-    );
+    setLoading(true);
 
 
-  } finally {
+    try {
 
-    setLoading(false);
+      const deviceId =
+        `kaduna-mobile-${Platform.OS}`;
+
+
+      const deviceName =
+        Platform.OS === 'android'
+          ? 'Android Mobile'
+          : 'iPhone';
+
+
+      const platform =
+        Platform.OS;
+
+
+      const response =
+        await api.post(
+          '/auth/login',
+          {
+            phone: cleanPhone,
+
+            password,
+
+            deviceId,
+
+            deviceName,
+
+            platform,
+          }
+        );
+
+
+      console.log(
+        '[MOBILE LOGIN RESPONSE]',
+        response.data
+      );
+
+
+      const result =
+        response?.data;
+
+
+      if (
+        !result?.success ||
+        !result?.data?.token ||
+        !result?.data?.user
+      ) {
+
+        throw new Error(
+          result?.message ||
+          'Login failed. Invalid server response.'
+        );
+
+      }
+
+
+      const token =
+        result.data.token;
+
+
+      const user =
+        result.data.user;
+
+
+      /*
+      =====================================================
+      SAVE AUTH
+      =====================================================
+      */
+
+      await saveAuth(
+        user,
+        token
+      );
+
+
+      setAuthToken(
+        token
+      );
+
+
+      console.log(
+        '[MOBILE LOGIN] Authentication saved'
+      );
+
+      console.log(
+        '[MOBILE LOGIN] Role:',
+        user.role
+      );
+
+
+      /*
+      =====================================================
+      ROLE ROUTING
+      =====================================================
+      */
+
+      const role =
+        String(
+          user?.role || ''
+        )
+          .trim()
+          .toLowerCase();
+
+
+      if (role === 'driver') {
+
+        router.replace(
+          '/driver'
+        );
+
+        return;
+
+      }
+
+
+      if (role === 'rider') {
+
+        router.replace(
+          '/rider'
+        );
+
+        return;
+
+      }
+
+
+      if (role === 'admin') {
+
+        Alert.alert(
+          'Login Successful',
+          'Admin account detected. The mobile admin dashboard will be added next.'
+        );
+
+        return;
+
+      }
+
+
+      Alert.alert(
+        'Login Error',
+        `Unknown account role: ${user.role}`
+      );
+
+    } catch (
+      error: any
+    ) {
+
+      console.log(
+        '[MOBILE LOGIN ERROR]',
+        error
+      );
+
+
+      let message =
+        'Unable to connect to Kaduna Only.';
+
+
+      if (
+        error?.response?.data?.message
+      ) {
+
+        message =
+          error.response.data.message;
+
+      } else if (
+        error?.message
+      ) {
+
+        message =
+          error.message;
+
+      }
+
+
+      Alert.alert(
+        'Login Failed',
+        message
+      );
+
+    } finally {
+
+      setLoading(false);
+
+    }
 
   }
 
-}
+
   /*
   =======================================================
   NAVIGATION
@@ -359,11 +333,11 @@ async function handleLogin() {
           disabled={loading}
         >
 
-          <Text
-            style={styles.backIcon}
-          >
-            ‹
-          </Text>
+          <Ionicons
+            name="chevron-back"
+            size={28}
+            color={BrandColors.text}
+          />
 
         </Pressable>
 
@@ -514,13 +488,20 @@ async function handleLogin() {
                 style={
                   styles.eyeButton
                 }
+                hitSlop={8}
               >
 
-                <Text
-                  style={styles.eyeIcon}
-                >
-                  {showPassword ? '◉' : '◌'}
-                </Text>
+                <Ionicons
+                  name={
+                    showPassword
+                      ? 'eye-off-outline'
+                      : 'eye-outline'
+                  }
+                  size={20}
+                  color={
+                    BrandColors.textSecondary
+                  }
+                />
 
               </Pressable>
 
@@ -535,9 +516,8 @@ async function handleLogin() {
 
           <Pressable
             onPress={() =>
-              Alert.alert(
-                'Forgot Password',
-                'Password recovery will be connected to the Kaduna Only account system.'
+              router.push(
+                '/forgot-password'
               )
             }
             disabled={loading}
@@ -636,11 +616,11 @@ async function handleLogin() {
               style={styles.socialButton}
             >
 
-              <Text
-                style={styles.googleText}
-              >
-                G
-              </Text>
+              <Ionicons
+                name="logo-google"
+                size={20}
+                color="#4285F4"
+              />
 
             </Pressable>
 
@@ -650,11 +630,11 @@ async function handleLogin() {
               style={styles.socialButton}
             >
 
-              <Text
-                style={styles.appleText}
-              >
-                
-              </Text>
+              <Ionicons
+                name="logo-apple"
+                size={22}
+                color={BrandColors.text}
+              />
 
             </Pressable>
 
@@ -758,23 +738,6 @@ const styles =
 
       alignItems:
         'flex-start',
-
-    },
-
-
-    backIcon: {
-
-      fontSize:
-        34,
-
-      lineHeight:
-        34,
-
-      fontWeight:
-        '300',
-
-      color:
-        BrandColors.text,
 
     },
 
@@ -1109,17 +1072,6 @@ const styles =
     },
 
 
-    eyeIcon: {
-
-      fontSize:
-        18,
-
-      color:
-        BrandColors.textSecondary,
-
-    },
-
-
     /*
     -------------------------------------------------------
     FORGOT
@@ -1309,31 +1261,6 @@ const styles =
 
       backgroundColor:
         BrandColors.background,
-
-    },
-
-
-    googleText: {
-
-      fontSize:
-        19,
-
-      fontWeight:
-        '800',
-
-      color:
-        '#4285F4',
-
-    },
-
-
-    appleText: {
-
-      fontSize:
-        22,
-
-      color:
-        BrandColors.text,
 
     },
 

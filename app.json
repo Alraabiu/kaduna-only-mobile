@@ -1,4 +1,4 @@
-{
+﻿{
   "expo": {
     "name": "Kaduna Only",
     "slug": "kaduna-only",
@@ -44,9 +44,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#430386",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 300
         }
       ],
       "expo-secure-store",
@@ -86,3 +86,5 @@
     }
   }
 }
+
+
